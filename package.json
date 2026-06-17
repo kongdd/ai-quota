@@ -1,0 +1,34 @@
+{
+  "name": "minimax-quota",
+  "version": "0.1.0",
+  "description": "Show MiniMax Coding Plan 5h / weekly quota in the terminal",
+  "type": "module",
+  "bin": {
+    "minimax-quota": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "start": "node --enable-source-maps dist/cli.js",
+    "dev": "npm run build && npm start",
+    "clean": "rm -rf dist"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "minimax",
+    "quota",
+    "cli",
+    "coding-plan"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "typescript": "^6.0.3"
+  }
+}
