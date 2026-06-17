@@ -1,6 +1,6 @@
 # ai-quota
 
-Show AI coding-plan quota (MiniMax / OpenAI Codex) in the terminal. Zero runtime dependencies.
+Show AI coding-plan quota (MiniMax / OpenAI Codex / Claude Code) in the terminal. Zero runtime dependencies.
 
 ## Install
 
@@ -14,17 +14,20 @@ npm link --bin-links=true   # exposes `ai-quota` on PATH
 
 ## Usage
 
-By default `ai-quota` queries **both** providers in parallel and prints each result. Use `--provider` to limit to a single one.
+![usage](docs/ai-quota.png)
+
+By default `ai-quota` queries **all three** providers in parallel and prints each result. Use `--provider` to limit to a single one.
 
 ```bash
-# Both providers (default)
+# All three providers (default)
 ai-quota
 export MINIMAX_API_KEY=sk-cp-xxxxxxxx   # needed for the MiniMax block
-ai-quota                                  # both blocks in one run
+ai-quota                                  # MiniMax + OpenAI Codex + Claude Code in one run
 
 # Single provider
 ai-quota --provider minimax --region intl
 ai-quota --provider openai                # reads ~/.codex/auth.json
+ai-quota --provider claude                # reads ~/.claude/.credentials.json
 ```
 
 Or pass the MiniMax key directly:
@@ -33,21 +36,22 @@ Or pass the MiniMax key directly:
 ai-quota --provider minimax --key sk-cp-xxxxxxxx
 ```
 
-If the MiniMax key is missing in default mode, only the OpenAI block is printed (and vice versa) — failure of one provider does not abort the other.
+If the MiniMax key is missing in default mode, only the available blocks are printed — failure of one provider does not abort the others.
 
 ### Options
 
-| Flag                               | Description                                                                      |
-| ---------------------------------- | -------------------------------------------------------------------------------- |
-| `-p, --provider <minimax\|openai>` | Single provider (default: both)                                                  |
-| `-k, --key <KEY>`                  | MiniMax API key (or env `MINIMAX_API_KEY`)                                       |
-| `-r, --region <cn\|intl>`          | MiniMax endpoint (default `cn`)                                                  |
-| `-g, --group-id <ID>`              | MiniMax group ID (optional query param)                                          |
-| `--codex-auth <PATH>`              | Codex `auth.json` path (default `$CODEX_HOME/auth.json` or `~/.codex/auth.json`) |
-| `-h, --help`                       | Show help                                                                        |
-| `-v, --version`                    | Show version                                                                     |
+| Flag                                       | Description                                                                                               |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| `-p, --provider <minimax\|openai\|claude>` | Single provider (default: all three)                                                                      |
+| `-k, --key <KEY>`                          | MiniMax API key (or env `MINIMAX_API_KEY`)                                                                |
+| `-r, --region <cn\|intl>`                  | MiniMax endpoint (default `cn`)                                                                           |
+| `-g, --group-id <ID>`                      | MiniMax group ID (optional query param)                                                                   |
+| `--codex-auth <PATH>`                      | Codex `auth.json` path (default `$CODEX_HOME/auth.json` or `~/.codex/auth.json`)                          |
+| `--claude-auth <PATH>`                     | Claude credentials path (default `$CLAUDE_CONFIG_DIR/.credentials.json` or `~/.claude/.credentials.json`) |
+| `-h, --help`                               | Show help                                                                                                 |
+| `-v, --version`                            | Show version                                                                                              |
 
-Environment: `NO_COLOR=1` disables ANSI colors. `CODEX_HOME` overrides the default Codex home directory.
+Environment: `NO_COLOR=1` disables ANSI colors. `CODEX_HOME` overrides the default Codex home directory; `CLAUDE_CONFIG_DIR` overrides the default Claude home directory.
 
 ## Output
 
@@ -72,6 +76,16 @@ OpenAI Codex · 2026-06-17 16:25:21
   codex · plus   ██████░░░░ 54% 34m █████░░░░░ 42% 19h 34m
 ```
 
+### Claude Code
+
+```
+Claude Code · 2026-06-17 16:52:34
+
+── usage ──
+  Model          5h                     week
+  claude · pro   ██████░░░░ 53%  3h  7m ████████░ 71%  7m
+```
+
 Color coding: green (< 50%), yellow (< 80%), red (≥ 80%).
 
 ## How it works
@@ -88,6 +102,12 @@ The headers (`User-Agent: codex_cli_rs/0.0.0`, `OpenAI-Beta: responses_websocket
 
 The call is a single read-only GET: **no tokens consumed, no side effects**. Retries 3× on transient `UND_ERR_CONNECT_TIMEOUT` (Cloudflare fronting `chatgpt.com` is flaky from some networks).
 
+### Claude Code
+
+Reads `~/.claude/.credentials.json` for the Claude Code OAuth access token (set up via `claude login`), then `GET`s `https://api.anthropic.com/api/oauth/usage` with the `anthropic-beta: oauth-2025-04-20` header that the endpoint requires. The response is JSON with two utilization windows — `five_hour` (current session, percentage used) and `seven_day` (weekly, percentage used) — each with an ISO 8601 `resets_at` timestamp. `extra_usage` (when `is_enabled`) shows pay-as-you-go consumption.
+
+The endpoint shape and required beta header were reverse-engineered by [aweussom/claude-code-quota](https://github.com/aweussom/claude-code-quota) from the Claude Code CLI. The call is a single read-only GET: **no tokens consumed, no side effects**. Retries 3× on transient network errors.
+
 ## Endpoints
 
 | Provider | Region | URL                                                                |
@@ -95,6 +115,7 @@ The call is a single read-only GET: **no tokens consumed, no side effects**. Ret
 | MiniMax  | cn     | `https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains` |
 | MiniMax  | intl   | `https://api.minimax.io/v1/api/openplatform/coding_plan/remains`   |
 | OpenAI   | —      | `https://chatgpt.com/backend-api/wham/usage`                       |
+| Claude   | —      | `https://api.anthropic.com/api/oauth/usage`                        |
 
 Coding Plan keys (`sk-cp-…`) only work on the platform that issued them; pass `--region` to match.
 
