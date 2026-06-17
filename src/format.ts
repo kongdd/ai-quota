@@ -1,4 +1,4 @@
-import type { ModelRemain } from "./api.js";
+import type { ModelRemain } from "./minimax.js";
 
 const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 const useColor =
@@ -58,7 +58,7 @@ function renderCell(col: Col, m: ModelRemain, now: number): string {
 /** 去掉 ANSI 转义码以计算显示宽度 */
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
 
-export function renderReport(items: ModelRemain[], now = Date.now()): string {
+export function renderReport(items: ModelRemain[], now = Date.now(), title = "MiniMax Coding Plan"): string {
   if (items.length === 0) return dim("no quota data");
   const sorted = [...items].sort((a, b) => a.model_name.localeCompare(b.model_name));
 
@@ -75,7 +75,7 @@ export function renderReport(items: ModelRemain[], now = Date.now()): string {
     COLS.map((col, i) => bold(col.label).padEnd(colWidths[i] ?? col.label.length)).join(" ");
 
   const lines: string[] = [
-    bold(magenta("MiniMax Coding Plan")) + dim(` · ${fmtTime(now)}`),
+    bold(magenta(title)) + dim(` · ${fmtTime(now)}`),
     "",
     cyan(bold("── usage ──")),
     header,

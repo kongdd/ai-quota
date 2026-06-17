@@ -1,10 +1,10 @@
 {
-  "name": "minimax-quota",
+  "name": "ai-quota",
   "version": "0.1.0",
-  "description": "Show MiniMax Coding Plan 5h / weekly quota in the terminal",
+  "description": "Show AI coding-plan quota (MiniMax / OpenAI Codex) in the terminal",
   "type": "module",
   "bin": {
-    "minimax-quota": "./dist/cli.js"
+    "ai-quota": "./dist/cli.js"
   },
   "files": [
     "dist",
@@ -22,6 +22,8 @@
   },
   "keywords": [
     "minimax",
+    "openai",
+    "codex",
     "quota",
     "cli",
     "coding-plan"
