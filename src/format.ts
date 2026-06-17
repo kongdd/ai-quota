@@ -5,7 +5,8 @@ const useColor =
   !!process.env.FORCE_COLOR ||
   (!process.env.NO_COLOR && process.env.TERM !== "dumb" && !!process.stdout.isTTY);
 const c = (code: number) => (s: string) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s);
-const dim = c(2), green = c(32), yellow = c(33), red = c(31), cyan = c(36), magenta = c(35), bold = c(1);
+export const dim = c(2);
+const green = c(32), yellow = c(33), red = c(31), cyan = c(36), magenta = c(35), bold = c(1);
 
 function fmtDuration(ms: number): string {
   if (ms < 0) ms = 0;

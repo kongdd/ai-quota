@@ -69,21 +69,21 @@ export function loadCodexToken(authPath = defaultAuthPath()): CodexToken {
   try {
     raw = readFileSync(authPath, "utf8");
   } catch (e) {
-    throw new CodexAuthError(`read ${authPath} failed: ${e instanceof Error ? e.message : e}`);
+    throw new CodexAuthError(`read ${authPath} failed: ${e instanceof Error ? e.message : e}`, false);
   }
 
   let parsed: AuthDotJson;
   try {
     parsed = JSON.parse(raw) as AuthDotJson;
   } catch (e) {
-    throw new CodexAuthError(`parse ${authPath}: ${e instanceof Error ? e.message : e}`);
+    throw new CodexAuthError(`parse ${authPath}: ${e instanceof Error ? e.message : e}`, false);
   }
 
   if (parsed.auth_mode && parsed.auth_mode !== "chatgpt") {
-    throw new CodexAuthError(`auth_mode=${parsed.auth_mode}, only "chatgpt" exposes quota windows`);
+    throw new CodexAuthError(`auth_mode=${parsed.auth_mode}, only "chatgpt" exposes quota windows`, false);
   }
   const accessToken = parsed.tokens?.access_token;
-  if (!accessToken) throw new CodexAuthError(`tokens.access_token missing in ${authPath}`);
+  if (!accessToken) throw new CodexAuthError(`tokens.access_token missing in ${authPath}`, false);
   const accountId = parsed.tokens?.account_id;
   return accountId ? { accessToken, accountId } : { accessToken };
 }
@@ -167,7 +167,8 @@ export async function queryQuota(
       });
       if (!resp.ok) {
         const body = await resp.text().catch(() => "");
-        throw new CodexAuthError(`HTTP ${resp.status} ${body.slice(0, 200)}`, false);
+        // 429 是限流而非鉴权失败，让 watch 模式走指数退避而不是直接退出
+        throw new CodexAuthError(`HTTP ${resp.status} ${body.slice(0, 200)}`, resp.status === 429);
       }
       const data = (await resp.json()) as WhamResponse;
       const modelName = data.plan_type ? `codex · ${data.plan_type}` : "codex";

@@ -65,18 +65,18 @@ export function loadClaudeToken(authPath = defaultAuthPath()): ClaudeToken {
   try {
     raw = readFileSync(authPath, "utf8");
   } catch (e) {
-    throw new ClaudeAuthError(`read ${authPath} failed: ${e instanceof Error ? e.message : e}`);
+    throw new ClaudeAuthError(`read ${authPath} failed: ${e instanceof Error ? e.message : e}`, false);
   }
 
   let parsed: CredentialsJson;
   try {
     parsed = JSON.parse(raw) as CredentialsJson;
   } catch (e) {
-    throw new ClaudeAuthError(`parse ${authPath}: ${e instanceof Error ? e.message : e}`);
+    throw new ClaudeAuthError(`parse ${authPath}: ${e instanceof Error ? e.message : e}`, false);
   }
 
   const accessToken = parsed.claudeAiOauth?.accessToken;
-  if (!accessToken) throw new ClaudeAuthError(`claudeAiOauth.accessToken missing in ${authPath}`);
+  if (!accessToken) throw new ClaudeAuthError(`claudeAiOauth.accessToken missing in ${authPath}`, false);
   const subscriptionType = parsed.claudeAiOauth?.subscriptionType;
   return subscriptionType ? { accessToken, subscriptionType } : { accessToken };
 }
@@ -160,7 +160,8 @@ export async function queryQuota(
       });
       if (!resp.ok) {
         const body = await resp.text().catch(() => "");
-        throw new ClaudeAuthError(`HTTP ${resp.status} ${body.slice(0, 200)}`, false);
+        // 429 是限流而非鉴权失败，让 watch 模式走指数退避而不是直接退出
+        throw new ClaudeAuthError(`HTTP ${resp.status} ${body.slice(0, 200)}`, resp.status === 429);
       }
       const data = (await resp.json()) as UsageResponse;
       const modelName = token.subscriptionType ? `claude · ${token.subscriptionType}` : "claude";
