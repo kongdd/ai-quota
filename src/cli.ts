@@ -169,11 +169,14 @@ async function runWatch(
       process.exit(2);
     }
     const retryable = results.some((r) => !r.ok);
-    for (const r of results) {
-      if (!r.ok) process.stderr.write(`ai-quota: ${r.name}: ${formatError(r.error)}\n`);
-    }
+    // 错误行放进 frame body 而非 stderr：stderr 行不会计入 lastLines，光标倒带够不到，
+    // 上一帧的 hint + 本帧的 stderr 会一直留在屏幕上，hint 就越积越多。
+    const errorLines = results
+      .filter((r): r is Extract<RunResult, { ok: false }> => !r.ok)
+      .map((r) => `ai-quota: ${r.name}: ${formatError(r.error)}`);
     const items = results.filter((r): r is Extract<RunResult, { ok: true }> => r.ok).flatMap((r) => r.items);
-    const body = items.length === 0 ? dim("no quota data") : renderReport(items);
+    const report = items.length === 0 ? dim("no quota data") : renderReport(items);
+    const body = errorLines.length === 0 ? report : `${report}\n${errorLines.join("\n")}`;
 
     if (retryable) {
       failures++;
