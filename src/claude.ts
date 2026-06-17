@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { ModelRemain, QuotaResponse } from "./minimax.js";
 
 export class ClaudeAuthError extends Error {
-  constructor(message: string) {
+  constructor(message: string, public retryable = true) {
     super(message);
     this.name = "ClaudeAuthError";
   }
@@ -160,13 +160,13 @@ export async function queryQuota(
       });
       if (!resp.ok) {
         const body = await resp.text().catch(() => "");
-        throw new ClaudeAuthError(`HTTP ${resp.status} ${body.slice(0, 200)}`);
+        throw new ClaudeAuthError(`HTTP ${resp.status} ${body.slice(0, 200)}`, false);
       }
       const data = (await resp.json()) as UsageResponse;
       const modelName = token.subscriptionType ? `claude · ${token.subscriptionType}` : "claude";
       const modelRemain = usageToModelRemain(data, modelName);
       if (!modelRemain) {
-        throw new ClaudeAuthError("five_hour.utilization missing in response");
+        throw new ClaudeAuthError("five_hour.utilization missing in response", false);
       }
       return {
         base_resp: { status_code: 0, status_msg: "ok" },
@@ -174,8 +174,8 @@ export async function queryQuota(
       };
     } catch (e) {
       lastErr = e;
-      if (e instanceof ClaudeAuthError && e.message.startsWith("HTTP ")) throw e;
-      if (e instanceof ClaudeAuthError && e.message.includes("missing")) throw e;
+      // 业务错误（HTTP 4xx/5xx、缺字段）不重试；只重试网络/超时
+      if (e instanceof ClaudeAuthError && !e.retryable) throw e;
       if (attempt < maxAttempts) await sleep(1000 * attempt);
     } finally {
       clearTimeout(timer);

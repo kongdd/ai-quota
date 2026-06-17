@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { ModelRemain, QuotaResponse } from "./minimax.js";
 
 export class CodexAuthError extends Error {
-  constructor(message: string) {
+  constructor(message: string, public retryable = true) {
     super(message);
     this.name = "CodexAuthError";
   }
@@ -167,13 +167,13 @@ export async function queryQuota(
       });
       if (!resp.ok) {
         const body = await resp.text().catch(() => "");
-        throw new CodexAuthError(`HTTP ${resp.status} ${body.slice(0, 200)}`);
+        throw new CodexAuthError(`HTTP ${resp.status} ${body.slice(0, 200)}`, false);
       }
       const data = (await resp.json()) as WhamResponse;
       const modelName = data.plan_type ? `codex · ${data.plan_type}` : "codex";
       const modelRemain = whamToModelRemain(data, modelName);
       if (!modelRemain) {
-        throw new CodexAuthError("rate_limit.primary_window missing in response");
+        throw new CodexAuthError("rate_limit.primary_window missing in response", false);
       }
       return {
         base_resp: { status_code: 0, status_msg: "ok" },
@@ -181,9 +181,8 @@ export async function queryQuota(
       };
     } catch (e) {
       lastErr = e;
-      // 业务错误（HTTP 4xx/5xx、解析错误）不重试；只重试网络/超时
-      if (e instanceof CodexAuthError && e.message.startsWith("HTTP ")) throw e;
-      if (e instanceof CodexAuthError && e.message.includes("missing")) throw e;
+      // 业务错误（HTTP 4xx/5xx、缺字段）不重试；只重试网络/超时
+      if (e instanceof CodexAuthError && !e.retryable) throw e;
       if (attempt < maxAttempts) await sleep(1000 * attempt);
     } finally {
       clearTimeout(timer);

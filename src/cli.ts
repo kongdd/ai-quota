@@ -52,9 +52,9 @@ function formatError(e: unknown): string {
 
 async function runMinimax(values: Record<string, unknown>): Promise<string> {
   const region = values.region as Region;
-  if (region !== "cn" && region !== "intl") die(`--region must be cn or intl`);
+  if (region !== "cn" && region !== "intl") throw new Error(`--region must be cn or intl`);
   const key = (values.key as string | undefined) ?? process.env.MINIMAX_API_KEY;
-  if (!key) die("API key required: pass --key or set MINIMAX_API_KEY");
+  if (!key) throw new Error("API key required: pass --key or set MINIMAX_API_KEY");
   const data = await queryMinimax(key, region, values["group-id"] as string | undefined);
   return renderReport(data.model_remains, Date.now(), "MiniMax Coding Plan");
 }
@@ -127,9 +127,8 @@ async function main(): Promise<void> {
   const blocks: string[] = [];
   const failures: string[] = [];
   for (let i = 0; i < providers.length; i++) {
-    const r = settled[i];
+    const r = settled[i]!;
     const name = providers[i];
-    if (!r) continue;
     if (r.status === "fulfilled") {
       blocks.push(r.value);
     } else {
@@ -147,7 +146,7 @@ async function main(): Promise<void> {
   // 多 provider 模式
   for (const f of failures) process.stderr.write(`ai-quota: ${f}\n`);
   if (blocks.length === 0) process.exit(2);
-  process.stdout.write(blocks.filter((s): s is string => !!s).join("\n\n") + "\n");
+  process.stdout.write(blocks.join("\n\n") + "\n");
 }
 
 void main();
