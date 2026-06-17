@@ -14,7 +14,7 @@ AI coding-plan quota (MiniMax / OpenAI Codex / Claude Code) in the terminal. Zer
 
 ## Usage
 
-![usage](docs/ai-quota.png)
+![usage](docs/ai-quota_V2.png)
 
 <!-- OpenAI / Claude blocks have the same shape, with their own provider line (`OpenAI Codex` / `Claude Code`).  -->
 Color coding: green (< 50%), yellow (< 80%), red (≥ 80%).

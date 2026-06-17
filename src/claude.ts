@@ -37,7 +37,7 @@ interface UsageWindow {
   /** 已用百分比 (0–100) */
   utilization?: number;
   /** 重置时间（ISO 8601） */
-  resets_at?: string;
+  resets_at?: string | null;
 }
 
 interface UsageResponse {
@@ -95,7 +95,7 @@ function buildClaudeHeaders(token: ClaudeToken): Record<string, string> {
 }
 
 /** 把 ISO 8601 时间戳解析为 epoch ms；解析失败返回 null */
-function parseResetMs(iso: string | undefined): number | null {
+function parseResetMs(iso: string | null | undefined): number | null {
   if (!iso) return null;
   const ms = Date.parse(iso);
   return Number.isFinite(ms) ? ms : null;
@@ -104,15 +104,15 @@ function parseResetMs(iso: string | undefined): number | null {
 /** 把 usage 响应里的窗口数据归一化到内部 ModelRemain（5h / week） */
 function usageToModelRemain(u: UsageResponse, modelName: string): ModelRemain | null {
   const fiveHour = u.five_hour;
-  if (!fiveHour?.utilization) return null;
+  if (fiveHour?.utilization === undefined) return null;
   const sevenDay = u.seven_day;
 
   const nowMs = Date.now();
-  const fiveEndMs = parseResetMs(fiveHour.resets_at);
+  const fiveUtil = fiveHour.utilization;
+  const fiveEndMs = parseResetMs(fiveHour.resets_at) ?? (fiveUtil === 0 ? nowMs : null);
   const sevenEndMs = parseResetMs(sevenDay?.resets_at) ?? fiveEndMs;
   if (fiveEndMs === null) return null;
 
-  const fiveUtil = fiveHour.utilization;
   const sevenUtil = sevenDay?.utilization ?? fiveUtil;
 
   return {

@@ -6,18 +6,16 @@ const useColor =
   (!process.env.NO_COLOR && process.env.TERM !== "dumb" && !!process.stdout.isTTY);
 const c = (code: number) => (s: string) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s);
 export const dim = c(2);
-const green = c(32), yellow = c(33), red = c(31), cyan = c(36), magenta = c(35), bold = c(1);
+const green = c(32), yellow = c(33), red = c(31), cyan = c(36);
 
 function fmtDuration(ms: number): string {
   if (ms < 0) ms = 0;
   const d = Math.floor(ms / DAY);
   const h = Math.floor((ms % DAY) / HOUR);
   const m = Math.floor((ms % HOUR) / MIN);
-  const parts: string[] = [];
-  if (d > 0) parts.push(`${d}d`);
-  if (d > 0 || h > 0) parts.push(`${String(h).padStart(2)}h`);
-  parts.push(`${String(m).padStart(2)}m`);
-  return parts.join(" ");
+  if (d > 0) return `${d}d ${String(h).padStart(2)}h ${String(m).padStart(2)}m`;
+  if (h > 0) return `${h}h ${String(m).padStart(2)}m`;
+  return `${m}m`;
 }
 
 function fmtTime(epochMs: number): string {
@@ -37,57 +35,66 @@ function colorFor(remaining: number) {
 }
 
 interface Col {
-  label: string;
   get: (m: ModelRemain) => { remaining: number; endTime: number };
 }
 
 const COLS: [Col, Col] = [
-  { label: "5h ", get: (m) => ({ remaining: m.interval.remaining_percent, endTime: m.interval.end_time }) },
-  { label: "week", get: (m) => ({ remaining: m.weekly.remaining_percent, endTime: m.weekly.end_time }) },
+  { get: (m) => ({ remaining: m.interval.remaining_percent, endTime: m.interval.end_time }) },
+  { get: (m) => ({ remaining: m.weekly.remaining_percent, endTime: m.weekly.end_time }) },
 ];
 
-function renderCell(col: Col, m: ModelRemain, now: number): string {
+function displayName(name: string): string {
+  if (name === "general" || name === "MiniMax") return "minimax";
+  if (name === "video" || name === "MiniMax-video") return "minimax video";
+  return name;
+}
+
+function modelRank(name: string): number {
+  const shown = displayName(name);
+  if (shown.startsWith("claude")) return 0;
+  if (shown.startsWith("codex")) return 1;
+  if (shown.startsWith("minimax")) return 2;
+  return 3;
+}
+
+function renderCell(col: Col, m: ModelRemain, now: number, durWidth: number): string {
   const { remaining, endTime } = col.get(m);
   const used = 100 - remaining;
   const color = colorFor(remaining);
   const b = color(bar(remaining));
-  const pct = `${used.toFixed(0)}%`.padStart(3);
+  const pct = `${used.toFixed(0).padStart(3)}%`;
   const inMs = endTime - now;
-  return `${b} ${color(pct)} ${cyan(fmtDuration(inMs))}`;
+  return `${b} ${color(pct)}  ${cyan(fmtDuration(inMs).padStart(durWidth))}`;
 }
 
 /** 去掉 ANSI 转义码以计算显示宽度 */
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
+const padVisible = (s: string, width: number): string => s + " ".repeat(Math.max(0, width - stripAnsi(s).length));
 
-export function renderReport(items: ModelRemain[], now = Date.now(), title = "MiniMax Coding Plan"): string {
+export function renderReport(items: ModelRemain[], now = Date.now(), _title = "MiniMax Coding Plan"): string {
   if (items.length === 0) return dim("no quota data");
-  const sorted = [...items].sort((a, b) => a.model_name.localeCompare(b.model_name));
+  const sorted = [...items].sort((a, b) => {
+    const byRank = modelRank(a.model_name) - modelRank(b.model_name);
+    return byRank || displayName(a.model_name).localeCompare(displayName(b.model_name));
+  });
 
-  // 预渲染所有单元格，按列取最大显示宽度
-  const cells = sorted.map((m) => COLS.map((col) => renderCell(col, m, now)));
-  const colWidths = COLS.map((col, i) =>
-    Math.max(col.label.length, ...cells.map((row) => stripAnsi(row[i] ?? "").length)),
+  // 先求每列 duration 的最大显示宽度（让短 duration 右对齐到该宽度）
+  const durWidths = COLS.map((col) =>
+    Math.max(...sorted.map((m) => fmtDuration(col.get(m).endTime - now).length)),
   );
 
-  const header =
-    "  " +
-    bold("Model").padEnd(14) +
-    " " +
-    COLS.map((col, i) => bold(col.label).padEnd(colWidths[i] ?? col.label.length)).join(" ");
-
-  const lines: string[] = [
-    bold(magenta(title)) + dim(` · ${fmtTime(now)}`),
-    "",
-    cyan(bold("── usage ──")),
-    header,
-  ];
+  // 预渲染所有单元格，按列取最大显示宽度
+  const cells = sorted.map((m) =>
+    COLS.map((col, i) => renderCell(col, m, now, durWidths[i] ?? 0)),
+  );
+  const colWidths = COLS.map((_, i) => Math.max(...cells.map((row) => stripAnsi(row[i] ?? "").length)));
+  const lines: string[] = [fmtTime(now)];
 
   sorted.forEach((m, r) => {
     const row =
       "  " +
-      m.model_name.padEnd(14) +
-      " " +
-      (cells[r] ?? []).map((cell, i) => cell.padEnd(colWidths[i] ?? 0)).join(" ");
+      displayName(m.model_name).padEnd(14) +
+      (cells[r] ?? []).map((cell, i) => padVisible(cell, colWidths[i] ?? 0)).join(" ");
     lines.push(row);
   });
 

@@ -4,7 +4,7 @@ import { parseArgs } from "node:util";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { queryQuota as queryMinimax, QuotaError, type Region } from "./minimax.js";
+import { queryQuota as queryMinimax, QuotaError, type ModelRemain, type Region } from "./minimax.js";
 import { queryQuota as queryOpenai, CodexAuthError, loadCodexToken } from "./openai.js";
 import { queryQuota as queryClaude, ClaudeAuthError, loadClaudeToken } from "./claude.js";
 import { renderReport, dim } from "./format.js";
@@ -18,13 +18,13 @@ const VERSION = (() => {
 })();
 
 type Provider = "minimax" | "openai" | "claude";
-type Runner = (v: Record<string, unknown>) => Promise<string>;
+type Runner = (v: Record<string, unknown>) => Promise<ModelRemain[]>;
 
 const HELP = `ai-quota — coding-plan quota for MiniMax, OpenAI Codex, and Claude Code
 
 Usage: ai-quota [options]
 
-By default, queries all three providers in parallel and prints each result.
+By default, queries all three providers in parallel and prints one combined report.
 Use --provider to limit to a single one. Use --watch to refresh periodically in place.
 
 Options:
@@ -79,31 +79,31 @@ function fmtInterval(ms: number): string {
   return rest === 0 ? `${m}m` : `${m}m${rest}s`;
 }
 
-async function runMinimax(values: Record<string, unknown>): Promise<string> {
+async function runMinimax(values: Record<string, unknown>): Promise<ModelRemain[]> {
   const region = values.region as Region;
   if (region !== "cn" && region !== "intl") throw new Error(`--region must be cn or intl`);
   const key = (values.key as string | undefined) ?? process.env.MINIMAX_API_KEY;
   if (!key) throw new Error("API key required: pass --key or set MINIMAX_API_KEY");
   const data = await queryMinimax(key, region, values["group-id"] as string | undefined);
-  return renderReport(data.model_remains, Date.now(), "MiniMax Coding Plan");
+  return data.model_remains;
 }
 
-async function runOpenai(values: Record<string, unknown>): Promise<string> {
+async function runOpenai(values: Record<string, unknown>): Promise<ModelRemain[]> {
   const authPath = values["codex-auth"] as string | undefined;
   const token = loadCodexToken(authPath);
   const data = await queryOpenai(token);
-  return renderReport(data.model_remains, Date.now(), "OpenAI Codex");
+  return data.model_remains;
 }
 
-async function runClaude(values: Record<string, unknown>): Promise<string> {
+async function runClaude(values: Record<string, unknown>): Promise<ModelRemain[]> {
   const authPath = values["claude-auth"] as string | undefined;
   const token = loadClaudeToken(authPath);
   const data = await queryClaude(token);
-  return renderReport(data.model_remains, Date.now(), "Claude Code");
+  return data.model_remains;
 }
 
 type RunResult =
-  | { name: Provider; ok: true; block: string }
+  | { name: Provider; ok: true; items: ModelRemain[] }
   | { name: Provider; ok: false; error: unknown };
 
 async function runOnce(providers: Provider[], values: Record<string, unknown>, runners: Record<Provider, Runner>): Promise<RunResult[]> {
@@ -111,24 +111,24 @@ async function runOnce(providers: Provider[], values: Record<string, unknown>, r
   return providers.map((name, i): RunResult => {
     const r = settled[i]!;
     return r.status === "fulfilled"
-      ? { name, ok: true, block: r.value }
+      ? { name, ok: true, items: r.value }
       : { name, ok: false, error: r.reason };
   });
 }
 
 function printOnce(results: RunResult[]): void {
-  const blocks = results.filter((r): r is Extract<RunResult, { ok: true }> => r.ok).map((r) => r.block);
+  const items = results.filter((r): r is Extract<RunResult, { ok: true }> => r.ok).flatMap((r) => r.items);
   const failures = results.filter((r): r is Extract<RunResult, { ok: false }> => !r.ok);
 
   if (results.length === 1) {
     const r = results[0]!;
     if (!r.ok) die(formatError(r.error));
-    process.stdout.write(blocks[0] + "\n");
+    process.stdout.write(renderReport(r.items) + "\n");
     return;
   }
   for (const f of failures) process.stderr.write(`ai-quota: ${f.name}: ${formatError(f.error)}\n`);
-  if (blocks.length === 0) process.exit(2);
-  process.stdout.write(blocks.join("\n\n") + "\n");
+  if (items.length === 0) process.exit(2);
+  process.stdout.write(renderReport(items) + "\n");
 }
 
 async function runWatch(
@@ -172,8 +172,8 @@ async function runWatch(
     for (const r of results) {
       if (!r.ok) process.stderr.write(`ai-quota: ${r.name}: ${formatError(r.error)}\n`);
     }
-    const blocks = results.filter((r): r is Extract<RunResult, { ok: true }> => r.ok).map((r) => r.block);
-    const body = blocks.length === 0 ? dim("no quota data") : blocks.join("\n\n");
+    const items = results.filter((r): r is Extract<RunResult, { ok: true }> => r.ok).flatMap((r) => r.items);
+    const body = items.length === 0 ? dim("no quota data") : renderReport(items);
 
     if (retryable) {
       failures++;
@@ -182,7 +182,7 @@ async function runWatch(
       failures = 0;
       currentIntervalMs = intervalMs;
     }
-    writeFrame(`${hint(currentIntervalMs)}\n\n${body}`);
+    writeFrame(`${hint(currentIntervalMs)}\n${body}`);
     schedule();
   };
 
