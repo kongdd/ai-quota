@@ -116,19 +116,31 @@ async function runOnce(providers: Provider[], values: Record<string, unknown>, r
   });
 }
 
-function printOnce(results: RunResult[]): void {
+/** 把 runOnce 的结果渲染成单帧文本（含报告 + 错误行），并标记首个致命错误。
+ *  watch / non-watch 共用渲染，调用方只决定写入位置与退出码。 */
+function renderFrame(results: RunResult[]): { body: string; fatal?: Extract<RunResult, { ok: false }> } {
   const items = results.filter((r): r is Extract<RunResult, { ok: true }> => r.ok).flatMap((r) => r.items);
-  const failures = results.filter((r): r is Extract<RunResult, { ok: false }> => !r.ok);
+  const errorLines = results
+    .filter((r): r is Extract<RunResult, { ok: false }> => !r.ok)
+    .map((r) => `ai-quota: ${r.name}: ${formatError(r.error)}`);
+  const report = items.length === 0 ? dim("no quota data") : renderReport(items);
+  const body = errorLines.length === 0 ? report : `${report}\n${errorLines.join("\n")}`;
+  const fatal = results.find((r): r is Extract<RunResult, { ok: false }> => !r.ok && isFatal(r.error));
+  return { body, fatal };
+}
 
+function printOnce(results: RunResult[]): void {
+  // 单 provider：没东西可显示，必须 die
   if (results.length === 1) {
     const r = results[0]!;
     if (!r.ok) die(formatError(r.error));
     process.stdout.write(renderReport(r.items) + "\n");
     return;
   }
-  for (const f of failures) process.stderr.write(`ai-quota: ${f.name}: ${formatError(f.error)}\n`);
-  if (items.length === 0) process.exit(2);
-  process.stdout.write(renderReport(items) + "\n");
+  // 多 provider：统一渲染；全部失败 → exit 2，否则正常打印
+  const { body } = renderFrame(results);
+  if (!results.some((r) => r.ok)) process.exit(2);
+  process.stdout.write(body + "\n");
 }
 
 async function runWatch(
@@ -163,20 +175,12 @@ async function runWatch(
 
   const tick = async () => {
     const results = await runOnce(providers, values, runners);
-    const fatal = results.find((r): r is Extract<RunResult, { ok: false }> => !r.ok && isFatal(r.error));
+    const { body, fatal } = renderFrame(results);
     if (fatal) {
       process.stderr.write(`ai-quota: ${fatal.name}: ${formatError(fatal.error)}\n`);
       process.exit(2);
     }
     const retryable = results.some((r) => !r.ok);
-    // 错误行放进 frame body 而非 stderr：stderr 行不会计入 lastLines，光标倒带够不到，
-    // 上一帧的 hint + 本帧的 stderr 会一直留在屏幕上，hint 就越积越多。
-    const errorLines = results
-      .filter((r): r is Extract<RunResult, { ok: false }> => !r.ok)
-      .map((r) => `ai-quota: ${r.name}: ${formatError(r.error)}`);
-    const items = results.filter((r): r is Extract<RunResult, { ok: true }> => r.ok).flatMap((r) => r.items);
-    const report = items.length === 0 ? dim("no quota data") : renderReport(items);
-    const body = errorLines.length === 0 ? report : `${report}\n${errorLines.join("\n")}`;
 
     if (retryable) {
       failures++;

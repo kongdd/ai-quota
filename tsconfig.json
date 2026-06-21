@@ -17,6 +17,7 @@
     "sourceMap": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
+    "newLine": "lf",
     "types": ["node"]
   },
   "include": ["src/**/*"]
