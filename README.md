@@ -29,9 +29,7 @@ ai-quota auth disable opencode            # skip a provider next time
 ai-quota auth enable opencode             # bring it back
 ```
 
-Auth: `MINIMAX_API_KEY` env only; OpenAI reads `~/.codex/auth.json`; Claude reads `~/.claude/.credentials.json`; OpenCode reads `~/.local/share/opencode/auth.json`. A missing provider doesn't abort the others.
-
-Auth: `MINIMAX_API_KEY` env (or `--key`); OpenAI reads `~/.codex/auth.json`; Claude reads `~/.claude/.credentials.json`. A missing provider doesn't abort the others.
+Auth: `MINIMAX_API_KEY` env only; OpenAI reads `~/.codex/auth.json`; Claude reads `~/.claude/.credentials.json`; OpenCode reads `~/.config/ai-quota/opencode.env`. A missing provider doesn't abort the others.
 
 ### Watch mode
 
@@ -50,13 +48,12 @@ Auth: `MINIMAX_API_KEY` env (or `--key`); OpenAI reads `~/.codex/auth.json`; Cla
 | `-r, --region <cn        | intl>`                                                                                              | MiniMax endpoint (default`cn`) |
 | `--codex-auth <PATH>`    | Codex auth (default`$CODEX_HOME/auth.json` or `~/.codex/auth.json`)                                 |
 | `--claude-auth <PATH>`   | Claude credentials (default`$CLAUDE_CONFIG_DIR/.credentials.json` or `~/.claude/.credentials.json`) |
-| `--opencode-auth <PATH>` | OpenCode auth (default`$XDG_DATA_HOME/opencode/auth.json` or `~/.local/share/opencode/auth.json`)   |
 | `-w, --watch`            | Refresh in place (implied by`-i`)                                                                   |
 | `-i, --interval <SECS>`  | Refresh interval (`30`/`30s`/`1m`, default `60`; implies `-w`)                                      |
 | `-h, --help`             | Show help                                                                                           |
 | `-v, --version`          | Show version                                                                                        |
 
-Env: `NO_COLOR=1`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `XDG_CONFIG_HOME`.
+Env: `NO_COLOR=1`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `XDG_CONFIG_HOME`, `OPENCODE_SERVER`, `OPENCODE_GO_ENV`, `LOCALAPPDATA`, `APPDATA`.
 
 ### Auth subcommands
 
@@ -77,65 +74,82 @@ disabled in the auth config. Use it for ad-hoc checks; the change doesn't persis
 
 ### OpenCode Go authorization
 
-OpenCode Go needs **two separate credentials**:
+OpenCode Go quota is read by scraping the workspace dashboard at `opencode.ai/workspace/<id>/go`. This requires a browser session cookie, which the OpenCode CLI does **not** persist — you must extract it once from DevTools.
 
-
-| Credential                  | Where it goes                           | Source                                                                                           |
-| --------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Bearer token (`auth.json`)  | `$XDG_DATA_HOME/opencode/auth.json`     | `opencode auth login` (OAuth device flow) **or** API key from the Go console (set `type: "api"`) |
-| Web session cookie (`auth`) | `~/.config/ai-quota/opencode.env` (env) | Browser DevTools → Application → Cookies on`opencode.ai`                                         |
-
-**Why two?** The `auth.json` Bearer token only authenticates API calls (`/zen/go/v1/chat/completions`); it is **not** a valid web session. OpenCode Go's quota dashboard at `opencode.ai/workspace/<id>/go` requires the browser session cookie, which OpenCode CLI does **not** persist. Without the cookie, `ai-quota` falls back to a free Bearer probe and reports `no quota data`.
+| Credential                 | Where it goes                            | Source                                                             |
+| -------------------------- | ---------------------------------------- | ------------------------------------------------------------------ |
+| `OPENCODE_GO_WORKSPACE_ID` | env or `~/.config/ai-quota/opencode.env` | URL when visiting the Go dashboard: `/workspace/wrk_xxxxxxxx/go`   |
+| `OPENCODE_GO_AUTH_COOKIE`  | env or `~/.config/ai-quota/opencode.env` | Browser DevTools → Application → Cookies → `auth` on `opencode.ai` |
 
 **One-time setup**
 
 ```bash
 # 1. Log in to opencode.ai in your browser (so the auth cookie exists).
 
-# 2. Grab the workspaceId from the URL when you visit Go dashboard:
+# 2. Grab the workspaceId from the URL when you visit the Go dashboard:
 #    https://opencode.ai/workspace/wrk_xxxxxxxx/go
 #    ↑ this part
 
 # 3. Grab the auth cookie value from DevTools → Application → Cookies → auth.
 
-# 4. Write both to ~/.config/ai-quota/opencode.env (auto-loaded by ai-quota):
-cat > ~/.config/ai-quota/opencode.env <<EOF
-export OPENCODE_GO_WORKSPACE_ID="wrk_xxxxxxxx"
-export OPENCODE_GO_AUTH_COOKIE="Fe26.2**..."
-EOF
-chmod 600 ~/.config/ai-quota/opencode.env
+# 4. Write both to the env file (auto-loaded by ai-quota):
 ```
 
-Run `ai-quota --provider opencode` (no `source` needed — the file is auto-loaded). The `auth` cookie is valid for **~1 year** from issue; if scraping suddenly fails with `dashboard auth failed`, re-extract from DevTools.
+**Linux/macOS (bash):**
+
+```bash
+install -m 600 /dev/null ~/.config/ai-quota/opencode.env
+cat >> ~/.config/ai-quota/opencode.env <<'EOF'
+OPENCODE_GO_WORKSPACE_ID="wrk_xxxxxxxx"
+OPENCODE_GO_AUTH_COOKIE="Fe26.2**..."
+EOF
+```
+
+**Windows (PowerShell):**
+
+```powershell
+# ai-quota 自动检测到 $env:APPDATA\ai-quota\opencode.env，无需 source
+$dir = Join-Path $env:APPDATA 'ai-quota'
+New-Item -ItemType Directory -Path $dir -Force | Out-Null
+$file = Join-Path $dir 'opencode.env'
+@'
+OPENCODE_GO_WORKSPACE_ID="wrk_xxxxxxxx"
+OPENCODE_GO_AUTH_COOKIE="Fe26.2**..."
+'@ | Set-Content -Path $file -Encoding utf8
+
+# 验证文件已就位
+Get-Content $file
+```
+
+Run `ai-quota --provider opencode` (no `source` needed — the file is auto-loaded on all platforms). The `auth` cookie is valid for **~1 year** from issue; if scraping suddenly fails with `dashboard auth failed`, re-extract from DevTools.
 
 **Override paths**
 
 ```bash
-# Different auth.json path
-ai-quota --provider opencode --opencode-auth /custom/path/auth.json
-
-# Different env file path (or inline env vars)
+# Different env file path
 OPENCODE_GO_ENV=/path/to/my.env ai-quota --provider opencode
+
+# Inline env vars (win over file)
 export OPENCODE_GO_WORKSPACE_ID=...
-export OPENCODE_GO_AUTH_COOKIE=...   # inline env wins over file
+export OPENCODE_GO_AUTH_COOKIE=...
 ai-quota --provider opencode
 
-# Self-hosted OpenCode
+# Self-hosted OpenCode (overrides default https://opencode.ai)
 export OPENCODE_SERVER=https://opencode.internal.example.com
 ```
 
-Without `OPENCODE_GO_WORKSPACE_ID` + `OPENCODE_GO_AUTH_COOKIE`, the OpenCode provider runs in **probe-only mode**: it validates the Bearer token against `/zen/go/v1/models` and returns `no quota data`. To disable the provider entirely: `ai-quota auth disable opencode`.
+Without `OPENCODE_GO_WORKSPACE_ID` + `OPENCODE_GO_AUTH_COOKIE`, the OpenCode provider errors out. To disable the provider entirely: `ai-quota auth disable opencode`.
 
 ## How it works
 
 Three read-only GETs, no side effects.
 
 
-| Provider     | Auth                                                                                           | Endpoint                                                                                                            |
-| ------------ | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| MiniMax      | `MINIMAX_API_KEY`                                                                              | `https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains` (intl: `minimax.io`)                             |
-| OpenAI Codex | OAuth JWT from`~/.codex/auth.json`                                                             | `https://chatgpt.com/backend-api/wham/usage` — must use Codex-style headers; `api.openai.com` returns 401           |
-| Claude Code  | OAuth token from`~/.claude/.credentials.json`                                                  | `https://api.anthropic.com/api/oauth/usage` — requires `anthropic-beta: oauth-2025-04-20`                           |
-| OpenCode Go  | Bearer from`~/.local/share/opencode/auth.json` + cookie from `~/.config/ai-quota/opencode.env` | `https://opencode.ai/workspace/<id>/go` (HTML scrape) — see [OpenCode Go authorization](#opencode-go-authorization) |
+| Provider     | Auth                                          | Endpoint                                                                                                            |
+| ------------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| MiniMax      | `MINIMAX_API_KEY`                             | `https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains` (intl: `minimax.io`)                             |
+| OpenAI Codex | OAuth JWT from`~/.codex/auth.json`            | `https://chatgpt.com/backend-api/wham/usage` — must use Codex-style headers; `api.openai.com` returns 401           |
+| Claude Code  | OAuth token from`~/.claude/.credentials.json` | `https://api.anthropic.com/api/oauth/usage` — requires `anthropic-beta: oauth-2025-04-20`                           |
+| OpenCode Go  | Cookie from `~/.config/ai-quota/opencode.env` | `https://opencode.ai/workspace/<id>/go` (HTML scrape) — see [OpenCode Go authorization](#opencode-go-authorization) |
 
-OpenAI retries 3× on transient `UND_ERR_CONNECT_TIMEOUT` (Cloudflare). Claude retries 3× on transient network errors. OpenCode Go falls back to a free probe of `https://opencode.ai/zen/go/v1/models` when the dashboard cookie is not configured. See [claude-code-quota](https://github.com/aweussom/claude-code-quota) for the Claude endpoint reverse-engineering notes; [minimax-coding-plan-quota-query](https://github.com/yunluoxin/minimax-coding-plan-quota-query) for MiniMax; [opencode-quota](https://github.com/slkiser/opencode-quota) for the OpenCode Go dashboard scraping pattern.
+OpenAI retries 3× on transient `UND_ERR_CONNECT_TIMEOUT` (Cloudflare). Claude retries 3× on transient network errors. See [claude-code-quota](https://github.com/aweussom/claude-code-quota) for the Claude endpoint reverse-engineering notes; [minimax-coding-plan-quota-query](https://github.com/yunluoxin/minimax-coding-plan-quota-query) for MiniMax; [opencode-quota](https://github.com/slkiser/opencode-quota) for the OpenCode Go dashboard scraping pattern.

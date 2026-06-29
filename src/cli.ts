@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { queryQuota as queryMinimax, QuotaError, type ModelRemain, type Region } from "./minimax.js";
 import { queryQuota as queryOpenai, CodexAuthError, loadCodexToken } from "./openai.js";
 import { queryQuota as queryClaude, ClaudeAuthError, loadClaudeToken } from "./claude.js";
-import { queryQuota as queryOpencode, OpencodeAuthError, loadOpencodeToken } from "./opencode.js";
+import { queryQuota as queryOpencode, OpencodeAuthError } from "./opencode.js";
 import { renderReport, dim, displayName } from "./format.js";
 import {
   KNOWN_PROVIDERS,
@@ -43,7 +43,6 @@ Options:
   -r, --region <cn|intl>           MiniMax endpoint (default: cn)
       --codex-auth <PATH>          Codex auth.json path (default: \$CODEX_HOME/auth.json or ~/.codex/auth.json)
       --claude-auth <PATH>         Claude credentials path (default: \$CLAUDE_CONFIG_DIR/.credentials.json or ~/.claude/.credentials.json)
-      --opencode-auth <PATH>       OpenCode auth.json path (default: \$XDG_DATA_HOME/opencode/auth.json or ~/.local/share/opencode/auth.json)
   -w, --watch                      Refresh in place until Ctrl+C (implied by --interval)
   -i, --interval <SECS>            Watch refresh interval (accepts 30, 30s, 1m; default 60). Implies --watch.
   -h, --help                       Show this help
@@ -164,10 +163,8 @@ async function runClaude(values: Record<string, unknown>): Promise<ModelRemain[]
   return data.model_remains;
 }
 
-async function runOpencode(values: Record<string, unknown>): Promise<ModelRemain[]> {
-  const authPath = values["opencode-auth"] as string | undefined;
-  const token = loadOpencodeToken(authPath);
-  const data = await queryOpencode(token);
+async function runOpencode(_values: Record<string, unknown>): Promise<ModelRemain[]> {
+  const data = await queryOpencode();
   return data.model_remains;
 }
 
@@ -288,7 +285,6 @@ async function main(): Promise<void> {
         region: { type: "string", short: "r", default: "cn" },
         "codex-auth": { type: "string" },
         "claude-auth": { type: "string" },
-        "opencode-auth": { type: "string" },
         watch: { type: "boolean", short: "w" },
         interval: { type: "string", short: "i" },
         help: { type: "boolean", short: "h" },
