@@ -53,7 +53,7 @@ Auth: `MINIMAX_API_KEY` env only; OpenAI reads `~/.codex/auth.json`; Claude read
 | `-h, --help`             | Show help                                                                                           |
 | `-v, --version`          | Show version                                                                                        |
 
-Env: `NO_COLOR=1`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `XDG_CONFIG_HOME`, `OPENCODE_SERVER`, `OPENCODE_GO_ENV`, `LOCALAPPDATA`, `APPDATA`.
+Env: `NO_COLOR=1`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `XDG_CONFIG_HOME`, `OPENCODE_SERVER`, `OPENCODE_GO_ENV`.
 
 ### Auth subcommands
 
@@ -95,7 +95,7 @@ OpenCode Go quota is read by scraping the workspace dashboard at `opencode.ai/wo
 # 4. Write both to the env file (auto-loaded by ai-quota):
 ```
 
-**Linux/macOS (bash):**
+**Linux/macOS/Windows (bash / Git Bash / WSL):**
 
 ```bash
 install -m 600 /dev/null ~/.config/ai-quota/opencode.env
@@ -105,23 +105,7 @@ OPENCODE_GO_AUTH_COOKIE="Fe26.2**..."
 EOF
 ```
 
-**Windows (PowerShell):**
-
-```powershell
-# ai-quota 自动检测到 $env:APPDATA\ai-quota\opencode.env，无需 source
-$dir = Join-Path $env:APPDATA 'ai-quota'
-New-Item -ItemType Directory -Path $dir -Force | Out-Null
-$file = Join-Path $dir 'opencode.env'
-@'
-OPENCODE_GO_WORKSPACE_ID="wrk_xxxxxxxx"
-OPENCODE_GO_AUTH_COOKIE="Fe26.2**..."
-'@ | Set-Content -Path $file -Encoding utf8
-
-# 验证文件已就位
-Get-Content $file
-```
-
-Run `ai-quota --provider opencode` (no `source` needed — the file is auto-loaded on all platforms). The `auth` cookie is valid for **~1 year** from issue; if scraping suddenly fails with `dashboard auth failed`, re-extract from DevTools.
+Run `ai-quota --provider opencode` (no `source` needed — the file is auto-loaded). The `auth` cookie is valid for **~1 year** from issue; if scraping suddenly fails with `dashboard auth failed`, re-extract from DevTools.
 
 **Override paths**
 

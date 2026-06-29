@@ -1,6 +1,6 @@
 {
   "name": "ai-quota",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Show AI coding-plan quota (MiniMax / OpenAI Codex / Claude Code / OpenCode Go) in the terminal",
   "type": "module",
   "bin": {

@@ -28,16 +28,8 @@ interface ScrapedWindow {
   resetInSec: number;
 }
 
-/** 平台相关的 ai-quota 配置目录（用于 opencode.env 自动加载）。
- *  - Linux/macOS：$XDG_CONFIG_HOME/ai-quota 或 ~/.config/ai-quota
- *  - Windows：%APPDATA%\ai-quota（漫游配置，符合 Windows 习惯）
- *  ponytail: 用户设了 $OPENCODE_GO_ENV 直接覆盖。 */
 function defaultEnvPath(): string {
   if (process.env.OPENCODE_GO_ENV) return process.env.OPENCODE_GO_ENV;
-  if (process.platform === "win32") {
-    const appData = process.env.APPDATA ?? join(homedir(), "AppData", "Roaming");
-    return join(appData, "ai-quota", "opencode.env");
-  }
   return join(homedir(), ".config", "ai-quota", "opencode.env");
 }
 
