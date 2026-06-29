@@ -43,7 +43,7 @@ const COLS: [Col, Col] = [
   { get: (m) => ({ remaining: m.weekly.remaining_percent, endTime: m.weekly.end_time }) },
 ];
 
-function displayName(name: string): string {
+export function displayName(name: string): string {
   if (name === "general" || name === "MiniMax") return "minimax";
   if (name === "video" || name === "MiniMax-video") return "minimax video";
   return name;
@@ -71,9 +71,16 @@ function renderCell(col: Col, m: ModelRemain, now: number, durWidth: number): st
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
 const padVisible = (s: string, width: number): string => s + " ".repeat(Math.max(0, width - stripAnsi(s).length));
 
-export function renderReport(items: ModelRemain[], now = Date.now(), _title = "MiniMax Coding Plan"): string {
+export function renderReport(
+  items: ModelRemain[],
+  now = Date.now(),
+  _title = "MiniMax Coding Plan",
+  filter?: (displayName: string) => boolean,
+): string {
   if (items.length === 0) return dim("no quota data");
-  const sorted = [...items].sort((a, b) => {
+  const visible = filter ? items.filter((m) => filter(displayName(m.model_name))) : items;
+  if (visible.length === 0) return dim("no quota data");
+  const sorted = [...visible].sort((a, b) => {
     const byRank = modelRank(a.model_name) - modelRank(b.model_name);
     return byRank || displayName(a.model_name).localeCompare(displayName(b.model_name));
   });

@@ -1,7 +1,7 @@
 {
   "name": "ai-quota",
-  "version": "0.1.0",
-  "description": "Show AI coding-plan quota (MiniMax / OpenAI Codex) in the terminal",
+  "version": "0.1.1",
+  "description": "Show AI coding-plan quota (MiniMax / OpenAI Codex / Claude Code / OpenCode Go) in the terminal",
   "type": "module",
   "bin": {
     "ai-quota": "./dist/cli.js"
@@ -26,6 +26,8 @@
     "minimax",
     "openai",
     "codex",
+    "claude",
+    "opencode",
     "quota",
     "cli",
     "coding-plan"
