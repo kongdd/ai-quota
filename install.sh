@@ -6,3 +6,4 @@ cd "$(dirname "$0")"
 npm run build
 npm link --bin-links=true
 command -v ai-quota >/dev/null && echo "✓ $(command -v ai-quota) → $(realpath "$(command -v ai-quota)")"
+command -v api-usage >/dev/null && echo "✓ $(command -v api-usage) → $(realpath "$(command -v api-usage)")"

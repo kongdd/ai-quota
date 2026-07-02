@@ -1,8 +1,8 @@
-# ai-quota
+<h1>ai-quota</h1>
 
-AI coding-plan quota (MiniMax / OpenAI Codex / Claude Code) in the terminal. Zero runtime dependencies, read-only GETs, no quota consumed.
+AI coding-plan quota (MiniMax / OpenAI Codex / Claude Code / OpenCode Go) and API usage budget in the terminal. Zero runtime dependencies, read-only GETs, no quota consumed.
 
-## Install
+## 1 Install
 
 ```bash
 ./install.sh
@@ -12,7 +12,7 @@ AI coding-plan quota (MiniMax / OpenAI Codex / Claude Code) in the terminal. Zer
 
 `npm link` symlinks `<prefix>/bin/ai-quota` → this repo's `dist/cli.js`. Re-running `npm run build` (or `./install.sh`) refreshes the binary in place — no re-link needed. Unlink with `npm unlink -g ai-quota`.
 
-## Usage
+## 2 Usage
 
 ![usage](docs/ai-quota_V2.png)
 
@@ -31,7 +31,34 @@ ai-quota auth enable opencode             # bring it back
 
 Auth: `MINIMAX_API_KEY` env only; OpenAI reads `~/.codex/auth.json`; Claude reads `~/.claude/.credentials.json`; OpenCode reads `~/.config/ai-quota/opencode.env`. A missing provider doesn't abort the others.
 
-### Watch mode
+## 3 API daily usage budget
+
+`api-usage` shows **account balance** and a local **daily budget progress bar**. For DeepSeek, it reads `GET /user/balance`; this is a read-only balance check, not a model call.
+
+```bash
+export DEEPSEEK_API_KEY="sk-..."
+
+api-usage                         # default daily budget: 5 CNY
+api-usage --budget 5              # same as above
+api-usage --watch -i 30s          # refresh in place every 30s
+api-usage --reset-today           # reset today's baseline to current account balance
+api-usage --currency USD          # show USD balance if the account has USD balance_infos
+```
+
+Output shape:
+
+```text
+2026-07-01 09:30:00
+  provider       deepseek
+  account        ¥17.8200 total  (¥0.0000 granted + ¥17.8200 topped-up)
+  daily budget   ¥3.8200 left / ¥5.0000  ██████░░░░░░░░░░░░░░░░░░ 23.6% used
+  today spent    ¥1.1800 since 2026-07-01
+  day baseline   ¥19.0000  2026-07-01T00:05:01.000Z
+```
+
+For each local date, the first run stores that day's starting account balance in `~/.config/ai-quota/api-usage.json`. Running the command many times in one day reuses the same daily baseline; the next local date automatically gets a new baseline. Use `--reset-today` when you want to restart today's 5 元 budget window.
+
+### 3.1 Watch mode
 
 `--watch` refreshes in place until Ctrl+C. `--interval` (`-i`) implies `--watch`; accepts `30`, `30s`, `1m`; default `60`.
 
@@ -39,7 +66,7 @@ Auth: `MINIMAX_API_KEY` env only; OpenAI reads `~/.codex/auth.json`; Claude read
 - **Pipe**: append mode, full history preserved.
 - **Errors**: transient (network, timeout, 429) retry. 429 triggers **exponential backoff** (`2×, 4×, …` capped at 5 min, resets on success). Fatal (auth, other 4xx/5xx, missing config) exits with code 2.
 
-### Options
+### 3.2 Options
 
 
 | Flag                     | Description                                                                                         |
@@ -55,7 +82,7 @@ Auth: `MINIMAX_API_KEY` env only; OpenAI reads `~/.codex/auth.json`; Claude read
 
 Env: `NO_COLOR=1`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `XDG_CONFIG_HOME`, `OPENCODE_SERVER`, `OPENCODE_GO_ENV`.
 
-### Auth subcommands
+### 3.3 Auth subcommands
 
 Default behavior queries every **enabled** provider. The set is persisted at
 `$XDG_CONFIG_HOME/ai-quota/auth.json` (defaults to `~/.config/ai-quota/auth.json`).
@@ -72,7 +99,7 @@ disabled in the auth config. Use it for ad-hoc checks; the change doesn't persis
 
 > MiniMax video plan is hardcoded off: it's not in `KNOWN_ITEMS`, so `auth enable minimax video` errors out and the video row never reaches the report.
 
-### OpenCode Go authorization
+### 3.4 OpenCode Go authorization
 
 OpenCode Go quota is read by scraping the workspace dashboard at `opencode.ai/workspace/<id>/go`. This requires a browser session cookie, which the OpenCode CLI does **not** persist — you must extract it once from DevTools.
 
@@ -124,7 +151,7 @@ export OPENCODE_SERVER=https://opencode.internal.example.com
 
 Without `OPENCODE_GO_WORKSPACE_ID` + `OPENCODE_GO_AUTH_COOKIE`, the OpenCode provider errors out. To disable the provider entirely: `ai-quota auth disable opencode`.
 
-## How it works
+## 4 How it works
 
 Three read-only GETs, no side effects.
 
