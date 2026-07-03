@@ -51,21 +51,23 @@ Output shape:
 ```text
 2026-07-02 20:20:04
   provider       deepseek-api
-  account        ¥18.0700 total  (¥0.0000 granted + ¥18.0700 topped-up)
-  daily budget   ¥7.0000 left / ¥7.0000  ░░░░░░░░░░░░░░░░░░░░░░░░ 0.0% used
-  today spent    ¥0.0000 since 2026-07-02
-  day baseline   ¥18.0700  2026-07-02T12:20:04.949Z
-  weekly budget  ¥35.0000 left / ¥35.0000  ░░░░░░░░░░░░░░░░░░░░░░░░ 0.0% used
-  week spent     ¥0.0000 since 2026-W27
-  week baseline  ¥18.0700  2026-07-02T12:20:04.949Z
+  account        ¥ 18.07 total  (¥ 0.00 granted + ¥ 18.07 topped-up)
+  weekly budget  ¥ 35.00 left / ¥ 35.00  ░░░░░░░░░░░░░░░░░░░░░░░░ 0.0% used
+  daily budget   ¥  7.00 left / ¥  7.00  ░░░░░░░░░░░░░░░░░░░░░░░░ 0.0% used
+  today spent    ¥ 0.00 since 2026-07-02
+  day baseline   ¥ 18.07  2026-07-02T12:20:04.949Z
+  week spent     ¥ 0.00 since 2026-06-29
+  week baseline  ¥ 18.07  2026-07-02T12:20:04.949Z
 ```
 
 State persisted in `~/.config/ai-quota/api-usage.json`:
-- **daily baseline** — first run of each local day stores that day's starting account balance; later runs compute `today used = dailyBaseline − current balance`.
-- **weekly baseline** — first run of each ISO week (Monday-start) stores that week's starting balance; later runs compute `week used = weeklyBaseline − current balance`.
-- `--reset-today` resets both baselines to the current balance.
+- **account ledger** — stores `last_balance` and `updated_at`, so the next run can persist the balance drop since the previous run.
+- **daily record** — first run of each local day stores a baseline; later runs accumulate balance drops into that day's `spent`.
+- **weekly record** — first run of each ISO week (Monday-start) stores a baseline; later runs accumulate balance drops into that week's `spent`.
+- **top-ups** — balance increases update `last_balance` but do not reduce recorded `spent`.
+- `--reset-today` resets both records to the current balance and clears recorded `spent`.
 
-Budget amounts are persisted once set (CLI > env > state). Env vars: `DEEPSEEK_DAILY_BUDGET` / `DEEPSEEK_WEEKLY_BUDGET`. DeepSeek's public API only exposes `/user/balance`; this is a local baseline, not a server-side cap.
+Budget amounts are persisted once set (CLI > env > state). Env vars: `DEEPSEEK_DAILY_BUDGET` / `DEEPSEEK_WEEKLY_BUDGET`. DeepSeek's public API only exposes `/user/balance`; this is a local spend ledger, not a server-side cap.
 
 ### 3.1 Watch mode
 
@@ -174,6 +176,6 @@ Three read-only GETs, no side effects.
 | OpenAI Codex | OAuth JWT from`~/.codex/auth.json`            | `https://chatgpt.com/backend-api/wham/usage` — must use Codex-style headers; `api.openai.com` returns 401           |
 | Claude Code  | OAuth token from`~/.claude/.credentials.json` | `https://api.anthropic.com/api/oauth/usage` — requires `anthropic-beta: oauth-2025-04-20`                           |
 | OpenCode Go  | Cookie from `~/.config/ai-quota/opencode.env` | `https://opencode.ai/workspace/<id>/go` (HTML scrape) — see [OpenCode Go authorization](#opencode-go-authorization) |
-| DeepSeek API | `DEEPSEEK_API_KEY`                            | `https://api.deepseek.com/user/balance` — server only exposes current balance; daily/weekly via local baseline |
+| DeepSeek API | `DEEPSEEK_API_KEY`                            | `https://api.deepseek.com/user/balance` — server only exposes current balance; daily/weekly via local spend ledger |
 
 OpenAI retries 3× on transient `UND_ERR_CONNECT_TIMEOUT` (Cloudflare). Claude retries 3× on transient network errors. See [claude-code-quota](https://github.com/aweussom/claude-code-quota) for the Claude endpoint reverse-engineering notes; [minimax-coding-plan-quota-query](https://github.com/yunluoxin/minimax-coding-plan-quota-query) for MiniMax; [opencode-quota](https://github.com/slkiser/opencode-quota) for the OpenCode Go dashboard scraping pattern.

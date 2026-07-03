@@ -44,9 +44,11 @@ Options:
   -r, --region <cn|intl>           MiniMax endpoint (default: cn)
       --codex-auth <PATH>          Codex auth.json path (default: \$CODEX_HOME/auth.json or ~/.codex/auth.json)
       --claude-auth <PATH>         Claude credentials path (default: \$CLAUDE_CONFIG_DIR/.credentials.json or ~/.claude/.credentials.json)
-      --deepseek-daily-budget <AMOUNT>  DeepSeek daily budget override (default: 7)
-      --deepseek-weekly-budget <AMOUNT> DeepSeek weekly budget override (default: 35)
-      --deepseek-config <PATH>     DeepSeek budget state file (default: ~/.config/ai-quota/api-usage.json)
+      --deepseek-daily-budget, --budget <AMOUNT>  DeepSeek daily budget override
+      --deepseek-weekly-budget, --weekly-budget <AMOUNT> DeepSeek weekly budget override
+      --currency <CNY|USD>         DeepSeek balance currency (default: state/env/CNY)
+      --deepseek-config, --config <PATH> DeepSeek budget state file (default: ~/.config/ai-quota/api-usage.json)
+      --reset-today, --reset       Reset DeepSeek daily + weekly baselines
   -w, --watch                      Refresh in place until Ctrl+C (implied by --interval)
   -i, --interval <SECS>            Watch refresh interval (accepts 30, 30s, 1m; default 60). Implies --watch.
   -h, --help                       Show this help
@@ -179,10 +181,10 @@ async function runDeepseek(values: Record<string, unknown>): Promise<ModelRemain
   const result = await computeDeepseekUsage({
     apiKey: key,
     currency: values.currency as string | undefined,
-    dailyBudget: values["deepseek-daily-budget"] as string | undefined,
-    weeklyBudget: values["deepseek-weekly-budget"] as string | undefined,
+    dailyBudget: (values["deepseek-daily-budget"] ?? values.budget) as string | undefined,
+    weeklyBudget: (values["deepseek-weekly-budget"] ?? values["weekly-budget"]) as string | undefined,
     resetToday: values["reset-today"] === true || values.reset === true,
-    configPath: (values["deepseek-config"] as string | undefined) ?? defaultStatePath(),
+    configPath: ((values["deepseek-config"] ?? values.config) as string | undefined) ?? defaultStatePath(),
   });
   return result.modelRemains;
 }
@@ -307,6 +309,12 @@ async function main(): Promise<void> {
         "deepseek-daily-budget": { type: "string" },
         "deepseek-weekly-budget": { type: "string" },
         "deepseek-config": { type: "string" },
+        budget: { type: "string" },
+        "weekly-budget": { type: "string" },
+        currency: { type: "string" },
+        config: { type: "string" },
+        "reset-today": { type: "boolean" },
+        reset: { type: "boolean" },
         watch: { type: "boolean", short: "w" },
         interval: { type: "string", short: "i" },
         help: { type: "boolean", short: "h" },

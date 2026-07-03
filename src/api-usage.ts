@@ -7,9 +7,8 @@ const HELP = `api-usage — deepseek-api balance, daily & weekly budget progress
 
 Usage: api-usage [options]
 
-First run each day records the current account balance as today's baseline; first run each ISO
-week records the weekly baseline. Later runs compute "today used = dailyBaseline − current"
-and "this week used = weeklyBaseline − current".
+First run each day/week records a baseline. Later runs accumulate balance drops into
+daily/weekly spent; top-ups do not reduce already recorded usage.
 
 Examples:
   api-usage                          # default daily 7 / weekly 35 CNY
@@ -62,8 +61,14 @@ function fmtInterval(ms: number): string {
 }
 
 function money(n: number, currency: string): string {
-  const symbol = currency.toUpperCase() === "CNY" ? "¥" : currency.toUpperCase() === "USD" ? "$" : `${currency} `;
-  return `${symbol}${n.toFixed(4)}`;
+  const symbol = currency.toUpperCase() === "CNY" ? "¥ " : currency.toUpperCase() === "USD" ? "$ " : `${currency} `;
+  return `${symbol}${n.toFixed(2)}`;
+}
+
+function alignedMoney(n: number, currency: string, width: number): string {
+  const code = currency.toUpperCase();
+  const symbol = code === "CNY" ? "¥ " : code === "USD" ? "$ " : `${code} `;
+  return `${symbol}${n.toFixed(2).padStart(width)}`;
 }
 
 function pct(n: number): string {
@@ -112,23 +117,27 @@ async function snapshot(values: Record<string, unknown>): Promise<DeepseekComput
 function render(s: DeepseekComputeResult["detail"]): string {
   const dailyColor = colorFor(s.todayUsedPercent);
   const weekColor = colorFor(s.weekUsedPercent);
+  const budgetWidth = Math.max(
+    s.todayLeft.toFixed(2).length,
+    s.dailyBudget.toFixed(2).length,
+    s.weekLeft.toFixed(2).length,
+    s.weeklyBudget.toFixed(2).length,
+  );
+  const budgetMoney = (n: number) => alignedMoney(n, s.currency, budgetWidth);
   const lines = [
     fmtTime(),
     `  provider       ${cyan(s.provider)}`,
     `  account        ${money(s.accountBalance, s.currency)} total  (${money(s.grantedBalance, s.currency)} granted + ${money(s.toppedUpBalance, s.currency)} topped-up)`,
-    `  daily budget   ${money(s.todayLeft, s.currency)} left / ${money(s.dailyBudget, s.currency)}  ${dailyColor(bar(s.todayUsedPercent))} ${dailyColor(pct(s.todayUsedPercent))} used`,
+    `  weekly budget  ${budgetMoney(s.weekLeft)} left / ${budgetMoney(s.weeklyBudget)}  ${weekColor(bar(s.weekUsedPercent))} ${weekColor(pct(s.weekUsedPercent))} used`,
+    `  daily budget   ${budgetMoney(s.todayLeft)} left / ${budgetMoney(s.dailyBudget)}  ${dailyColor(bar(s.todayUsedPercent))} ${dailyColor(pct(s.todayUsedPercent))} used`,
     `  today spent    ${money(s.todayUsed, s.currency)} since ${s.day}`,
     `  day baseline   ${money(s.baselineBalance, s.currency)}  ${dim(s.baselineCreatedAt)}`,
-    `  weekly budget  ${money(s.weekLeft, s.currency)} left / ${money(s.weeklyBudget, s.currency)}  ${weekColor(bar(s.weekUsedPercent))} ${weekColor(pct(s.weekUsedPercent))} used`,
-    `  week spent     ${money(s.weekUsed, s.currency)} since ${s.week}`,
+    `  week spent     ${money(s.weekUsed, s.currency)} since ${s.weekStart}`,
     `  week baseline  ${money(s.weekBaselineBalance, s.currency)}  ${dim(s.weekBaselineCreatedAt)}`,
     `  state          ${dim(s.statePath)}`,
     `  available      ${s.isAvailable ? green("yes") : red("no")}`,
   ];
   if (s.resetToday) lines.push(dim("  today's baseline reset to current account balance"));
-  if (s.accountBalance > s.baselineBalance) {
-    lines.push(dim("  note           account balance increased after today's baseline; balance-delta usage is clamped at 0"));
-  }
   return lines.join("\n");
 }
 
