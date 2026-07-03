@@ -54,8 +54,15 @@ function modelRank(name: string): number {
   if (shown.startsWith("claude")) return 0;
   if (shown.startsWith("codex")) return 1;
   if (shown.startsWith("minimax")) return 2;
-  if (shown.startsWith("deepseek")) return 3;
-  return 4;
+  if (shown.startsWith("opencode")) return 3;
+  if (shown.startsWith("deepseek")) return 99;
+  return 5;
+}
+
+function money(amount: number, currency: string): string {
+  const code = currency.toUpperCase();
+  const symbol = code === "CNY" ? "¥" : code === "USD" ? "$" : `${code} `;
+  return `${symbol}${amount.toFixed(2)}`;
 }
 
 function renderCell(col: Col, m: ModelRemain, now: number, durWidth: number): string {
@@ -99,10 +106,15 @@ export function renderReport(
   const lines: string[] = [fmtTime(now)];
 
   sorted.forEach((m, r) => {
+    const first = padVisible(cells[r]?.[0] ?? "", colWidths[0] ?? 0);
+    const tail = m.balance
+      ? ` ${money(m.balance.amount, m.balance.currency)}`
+      : (cells[r] ?? []).slice(1).map((cell, i) => ` ${padVisible(cell, colWidths[i + 1] ?? 0)}`).join("");
     const row =
       "  " +
       displayName(m.model_name).padEnd(14) +
-      (cells[r] ?? []).map((cell, i) => padVisible(cell, colWidths[i] ?? 0)).join(" ");
+      first +
+      tail;
     lines.push(row);
   });
 

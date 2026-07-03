@@ -24,6 +24,10 @@ export interface ModelRemain {
   model_name: string;
   interval: IntervalQuota;
   weekly: WeeklyQuota;
+  balance?: {
+    amount: number;
+    currency: string;
+  };
 }
 
 export interface QuotaResponse {

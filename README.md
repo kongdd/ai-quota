@@ -14,7 +14,7 @@ AI coding-plan quota (MiniMax / OpenAI Codex / Claude Code / OpenCode Go / DeepS
 
 ## 2 Usage
 
-![usage](docs/ai-quota_V2.png)
+![usage](docs/ai-quota_V3.png)
 
 <!-- OpenAI / Claude blocks have the same shape, with their own provider line (`OpenAI Codex` / `Claude Code`).  -->
 
