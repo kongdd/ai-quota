@@ -4,11 +4,11 @@ import { parseArgs } from "node:util";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { queryQuota as queryMinimax, QuotaError, type ModelRemain, type Region } from "./minimax.js";
-import { queryQuota as queryOpenai, CodexAuthError, loadCodexToken } from "./openai.js";
-import { queryQuota as queryClaude, ClaudeAuthError, loadClaudeToken } from "./claude.js";
-import { queryQuota as queryOpencode, OpencodeAuthError } from "./opencode.js";
-import { computeDeepseekUsage, DeepSeekUsageError, defaultStatePath } from "./deepseek.js";
+import { queryQuota as queryMinimax, QuotaError, type ModelRemain, type Region } from "./provider/minimax.js";
+import { queryQuota as queryOpenai, CodexAuthError, loadCodexToken } from "./provider/openai.js";
+import { queryQuota as queryClaude, ClaudeAuthError, loadClaudeToken } from "./provider/claude.js";
+import { queryQuota as queryOpencode, OpencodeAuthError } from "./provider/opencode.js";
+import { computeDeepseekUsage, DeepSeekUsageError, defaultStatePath } from "./provider/deepseek.js";
 import { renderReport, dim, displayName } from "./format.js";
 import {
   KNOWN_PROVIDERS,

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import process from "node:process";
 import { parseArgs } from "node:util";
-import { computeDeepseekUsage, DeepSeekUsageError, defaultStatePath, type DeepseekComputeResult } from "./deepseek.js";
+import { computeDeepseekUsage, DeepSeekUsageError, defaultStatePath, type DeepseekComputeResult } from "./provider/deepseek.js";
 
 const HELP = `api-usage — deepseek-api balance, daily & weekly budget progress
 

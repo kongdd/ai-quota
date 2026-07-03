@@ -1,4 +1,4 @@
-import type { ModelRemain } from "./minimax.js";
+import type { ModelRemain } from "./provider/minimax.js";
 
 const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 const useColor =

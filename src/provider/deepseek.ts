@@ -6,7 +6,7 @@ import {
   resolveBudget,
   saveLedgerState,
   windowEnd,
-} from "./balance-ledger.js";
+} from "../balance-ledger.js";
 import type { ModelRemain } from "./minimax.js";
 
 const API = "https://api.deepseek.com";
