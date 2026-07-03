@@ -1,29 +1,29 @@
 #!/usr/bin/env node
 import process from "node:process";
 import { parseArgs } from "node:util";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { queryDeepSeekBalance, DeepSeekUsageError, type DeepSeekBalanceInfo } from "./deepseek.js";
+import { computeDeepseekUsage, DeepSeekUsageError, defaultStatePath, type DeepseekComputeResult } from "./deepseek.js";
 
-const HELP = `api-usage — API account balance and daily budget progress
+const HELP = `api-usage — deepseek-api balance, daily & weekly budget progress
 
 Usage: api-usage [options]
 
-First run each day records the current account balance as today's baseline; later runs compute
-"today used = baseline − current balance".
+First run each day records the current account balance as today's baseline; first run each ISO
+week records the weekly baseline. Later runs compute "today used = dailyBaseline − current"
+and "this week used = weeklyBaseline − current".
 
 Examples:
-  api-usage                          # default daily budget: 5 CNY
-  api-usage --budget 10              # set daily budget to 10 CNY
+  api-usage                          # default daily 7 / weekly 35 CNY
+  api-usage --budget 10              # override daily budget to 10 CNY
+  api-usage --weekly-budget 50       # override weekly budget to 50 CNY
   api-usage --watch -i 30s           # refresh every 30s
-  api-usage --reset-today            # restart today's budget window
+  api-usage --reset-today            # restart today's + this week's budget window
 
 Options:
-      --provider <deepseek>      API provider (default: deepseek)
-      --budget <AMOUNT>         Daily budget amount (default: 5)
+      --provider <deepseek-api>  API provider (default: deepseek-api)
+      --budget <AMOUNT>         Daily budget amount (default: 7; persisted to state file once set)
+      --weekly-budget <AMOUNT>  Weekly budget amount (default: 35; persisted to state file once set)
       --currency <CNY|USD>      Balance currency to display (default: CNY)
-      --reset-today             Reset today's baseline to current account balance
+      --reset-today             Reset today's + this week's baseline to current account balance
       --reset                   Alias for --reset-today
       --config <PATH>           Budget state file (default: ~/.config/ai-quota/api-usage.json)
   -w, --watch                   Refresh in place until Ctrl+C (implied by --interval)
@@ -32,35 +32,6 @@ Options:
 
 Requires: DEEPSEEK_API_KEY env.
 `;
-
-interface DayState {
-  baseline_balance: number;
-  created_at: string;
-}
-
-interface BudgetState {
-  provider: "deepseek";
-  currency: string;
-  days: Record<string, DayState>;
-}
-
-interface UsageSnapshot {
-  provider: "deepseek";
-  currency: string;
-  day: string;
-  accountBalance: number;
-  grantedBalance: number;
-  toppedUpBalance: number;
-  isAvailable: boolean;
-  dailyBudget: number;
-  baselineBalance: number;
-  todayUsed: number;
-  todayLeft: number;
-  todayUsedPercent: number;
-  baselineCreatedAt: string;
-  statePath: string;
-  resetToday: boolean;
-}
 
 const useColor =
   !!process.env.FORCE_COLOR ||
@@ -72,24 +43,6 @@ function die(msg: string): never {
   process.stderr.write(`api-usage: ${msg}\n`);
   process.exit(2);
   throw new Error(msg);
-}
-
-function defaultStatePath(): string {
-  return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "ai-quota", "api-usage.json");
-}
-
-function parseNonNegativeMoney(raw: string | undefined, name: string): number {
-  if (raw === undefined || raw.trim() === "") die(`${name} is required`);
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 0) die(`${name} must be a non-negative number`);
-  return n;
-}
-
-function parsePositiveMoney(raw: string | undefined, name: string): number {
-  if (raw === undefined || raw.trim() === "") die(`${name} is required`);
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) die(`${name} must be > 0`);
-  return n;
 }
 
 function parseInterval(s: string): number {
@@ -106,44 +59,6 @@ function fmtInterval(ms: number): string {
   const m = Math.floor(s / 60);
   const rest = s % 60;
   return rest === 0 ? `${m}m` : `${m}m${rest}s`;
-}
-
-function localDay(d = new Date()): string {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function emptyState(currency: string): BudgetState {
-  return { provider: "deepseek", currency, days: {} };
-}
-
-function loadState(path: string, currency: string): BudgetState {
-  if (!existsSync(path)) return emptyState(currency);
-  const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<BudgetState>;
-  if (parsed.provider !== "deepseek" || typeof parsed.currency !== "string" || !parsed.days) {
-    return emptyState(currency);
-  }
-  const state: BudgetState = {
-    provider: "deepseek",
-    currency: parsed.currency,
-    days: parsed.days,
-  };
-  if (state.currency.toUpperCase() !== currency.toUpperCase()) return emptyState(currency);
-  return state;
-}
-
-function saveState(path: string, state: BudgetState): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(state, null, 2) + "\n", { mode: 0o600 });
-}
-
-function pickBalance(infos: DeepSeekBalanceInfo[], currency: string): DeepSeekBalanceInfo {
-  const exact = infos.find((x) => x.currency.toUpperCase() === currency.toUpperCase());
-  if (exact) return exact;
-  const available = infos.map((x) => x.currency).join(", ") || "none";
-  die(`currency ${currency} not found in balance_infos; available: ${available}`);
 }
 
 function money(n: number, currency: string): string {
@@ -174,70 +89,39 @@ function formatError(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-async function snapshot(values: Record<string, unknown>): Promise<UsageSnapshot> {
-  const provider = (values.provider as string | undefined) ?? "deepseek";
-  if (provider !== "deepseek") die(`--provider must be deepseek`);
+/** Compute → translate to CLI view → return the same UsageSnapshot shape the render expects. */
+async function snapshot(values: Record<string, unknown>): Promise<DeepseekComputeResult["detail"]> {
+  const provider = (values.provider as string | undefined) ?? "deepseek-api";
+  if (provider !== "deepseek-api") die(`--provider must be deepseek-api`);
 
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) die(`API key required: set DEEPSEEK_API_KEY env`);
 
-  const currency = ((values.currency as string | undefined) ?? process.env.DEEPSEEK_CURRENCY ?? "CNY").toUpperCase();
-  const dailyBudget = parsePositiveMoney(
-    (values.budget as string | undefined) ?? process.env.DEEPSEEK_DAILY_BUDGET ?? process.env.DEEPSEEK_BUDGET ?? "5",
-    "--budget",
-  );
+  const result = await computeDeepseekUsage({
+    apiKey,
+    currency: values.currency as string | undefined,
+    dailyBudget: values.budget as string | undefined,
+    weeklyBudget: values["weekly-budget"] as string | undefined,
+    resetToday: values["reset-today"] === true || values.reset === true,
+    configPath: (values.config as string | undefined) ?? defaultStatePath(),
+  });
 
-  const statePath = (values.config as string | undefined) ?? defaultStatePath();
-  const resetToday = values["reset-today"] === true || values.reset === true;
-  const day = localDay();
-
-  const data = await queryDeepSeekBalance(apiKey);
-  const info = pickBalance(data.balance_infos, currency);
-  const accountBalance = parseNonNegativeMoney(info.total_balance, "total_balance");
-  const grantedBalance = parseNonNegativeMoney(info.granted_balance, "granted_balance");
-  const toppedUpBalance = parseNonNegativeMoney(info.topped_up_balance, "topped_up_balance");
-
-  const state = loadState(statePath, currency);
-  let dayState = state.days[day];
-  if (!dayState || resetToday) {
-    dayState = { baseline_balance: accountBalance, created_at: new Date().toISOString() };
-    state.days[day] = dayState;
-  }
-  state.currency = currency;
-  saveState(statePath, state);
-
-  const todayUsed = Math.max(0, dayState.baseline_balance - accountBalance);
-  const todayLeft = Math.max(0, dailyBudget - todayUsed);
-  const todayUsedPercent = Math.min(100, (todayUsed / dailyBudget) * 100);
-
-  return {
-    provider: "deepseek",
-    currency,
-    day,
-    accountBalance,
-    grantedBalance,
-    toppedUpBalance,
-    isAvailable: data.is_available,
-    dailyBudget,
-    baselineBalance: dayState.baseline_balance,
-    todayUsed,
-    todayLeft,
-    todayUsedPercent,
-    baselineCreatedAt: dayState.created_at,
-    statePath,
-    resetToday,
-  };
+  return result.detail;
 }
 
-function render(s: UsageSnapshot): string {
-  const color = colorFor(s.todayUsedPercent);
+function render(s: DeepseekComputeResult["detail"]): string {
+  const dailyColor = colorFor(s.todayUsedPercent);
+  const weekColor = colorFor(s.weekUsedPercent);
   const lines = [
     fmtTime(),
     `  provider       ${cyan(s.provider)}`,
     `  account        ${money(s.accountBalance, s.currency)} total  (${money(s.grantedBalance, s.currency)} granted + ${money(s.toppedUpBalance, s.currency)} topped-up)`,
-    `  daily budget   ${money(s.todayLeft, s.currency)} left / ${money(s.dailyBudget, s.currency)}  ${color(bar(s.todayUsedPercent))} ${color(pct(s.todayUsedPercent))} used`,
+    `  daily budget   ${money(s.todayLeft, s.currency)} left / ${money(s.dailyBudget, s.currency)}  ${dailyColor(bar(s.todayUsedPercent))} ${dailyColor(pct(s.todayUsedPercent))} used`,
     `  today spent    ${money(s.todayUsed, s.currency)} since ${s.day}`,
     `  day baseline   ${money(s.baselineBalance, s.currency)}  ${dim(s.baselineCreatedAt)}`,
+    `  weekly budget  ${money(s.weekLeft, s.currency)} left / ${money(s.weeklyBudget, s.currency)}  ${weekColor(bar(s.weekUsedPercent))} ${weekColor(pct(s.weekUsedPercent))} used`,
+    `  week spent     ${money(s.weekUsed, s.currency)} since ${s.week}`,
+    `  week baseline  ${money(s.weekBaselineBalance, s.currency)}  ${dim(s.weekBaselineCreatedAt)}`,
     `  state          ${dim(s.statePath)}`,
     `  available      ${s.isAvailable ? green("yes") : red("no")}`,
   ];
@@ -289,6 +173,7 @@ async function main(): Promise<void> {
       options: {
         provider: { type: "string" },
         budget: { type: "string" },
+        "weekly-budget": { type: "string" },
         currency: { type: "string" },
         "reset-today": { type: "boolean" },
         reset: { type: "boolean" },

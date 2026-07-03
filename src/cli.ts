@@ -8,6 +8,7 @@ import { queryQuota as queryMinimax, QuotaError, type ModelRemain, type Region }
 import { queryQuota as queryOpenai, CodexAuthError, loadCodexToken } from "./openai.js";
 import { queryQuota as queryClaude, ClaudeAuthError, loadClaudeToken } from "./claude.js";
 import { queryQuota as queryOpencode, OpencodeAuthError } from "./opencode.js";
+import { computeDeepseekUsage, DeepSeekUsageError, defaultStatePath } from "./deepseek.js";
 import { renderReport, dim, displayName } from "./format.js";
 import {
   KNOWN_PROVIDERS,
@@ -28,10 +29,10 @@ const VERSION = (() => {
   }
 })();
 
-type Provider = "minimax" | "openai" | "claude" | "opencode";
+type Provider = "minimax" | "openai" | "claude" | "opencode" | "deepseek-api";
 type Runner = (v: Record<string, unknown>) => Promise<ModelRemain[]>;
 
-const HELP = `ai-quota — coding-plan quota for MiniMax, OpenAI Codex, Claude Code, and OpenCode Go
+const HELP = `ai-quota — coding-plan quota for MiniMax, OpenAI Codex, Claude Code, OpenCode Go, and DeepSeek API
 
 Usage: ai-quota [options]
 
@@ -39,10 +40,13 @@ By default, queries all providers in parallel and prints one combined report.
 Use --provider to limit to a single one. Use --watch to refresh periodically in place.
 
 Options:
-  -p, --provider <minimax|openai|claude|opencode>  Single provider (default: all four)
+  -p, --provider <minimax|openai|claude|opencode|deepseek-api>  Single provider (default: all enabled)
   -r, --region <cn|intl>           MiniMax endpoint (default: cn)
       --codex-auth <PATH>          Codex auth.json path (default: \$CODEX_HOME/auth.json or ~/.codex/auth.json)
       --claude-auth <PATH>         Claude credentials path (default: \$CLAUDE_CONFIG_DIR/.credentials.json or ~/.claude/.credentials.json)
+      --deepseek-daily-budget <AMOUNT>  DeepSeek daily budget override (default: 7)
+      --deepseek-weekly-budget <AMOUNT> DeepSeek weekly budget override (default: 35)
+      --deepseek-config <PATH>     DeepSeek budget state file (default: ~/.config/ai-quota/api-usage.json)
   -w, --watch                      Refresh in place until Ctrl+C (implied by --interval)
   -i, --interval <SECS>            Watch refresh interval (accepts 30, 30s, 1m; default 60). Implies --watch.
   -h, --help                       Show this help
@@ -79,6 +83,7 @@ function formatError(e: unknown): string {
   if (e instanceof CodexAuthError) return e.message;
   if (e instanceof ClaudeAuthError) return e.message;
   if (e instanceof OpencodeAuthError) return e.message;
+  if (e instanceof DeepSeekUsageError) return e.status ? `${e.status}: ${e.message}` : e.message;
   return e instanceof Error ? e.message : String(e);
 }
 
@@ -166,6 +171,20 @@ async function runClaude(values: Record<string, unknown>): Promise<ModelRemain[]
 async function runOpencode(_values: Record<string, unknown>): Promise<ModelRemain[]> {
   const data = await queryOpencode();
   return data.model_remains;
+}
+
+async function runDeepseek(values: Record<string, unknown>): Promise<ModelRemain[]> {
+  const key = process.env.DEEPSEEK_API_KEY;
+  if (!key) throw new Error("API key required: set DEEPSEEK_API_KEY env");
+  const result = await computeDeepseekUsage({
+    apiKey: key,
+    currency: values.currency as string | undefined,
+    dailyBudget: values["deepseek-daily-budget"] as string | undefined,
+    weeklyBudget: values["deepseek-weekly-budget"] as string | undefined,
+    resetToday: values["reset-today"] === true || values.reset === true,
+    configPath: (values["deepseek-config"] as string | undefined) ?? defaultStatePath(),
+  });
+  return result.modelRemains;
 }
 
 type RunResult =
@@ -285,6 +304,9 @@ async function main(): Promise<void> {
         region: { type: "string", short: "r", default: "cn" },
         "codex-auth": { type: "string" },
         "claude-auth": { type: "string" },
+        "deepseek-daily-budget": { type: "string" },
+        "deepseek-weekly-budget": { type: "string" },
+        "deepseek-config": { type: "string" },
         watch: { type: "boolean", short: "w" },
         interval: { type: "string", short: "i" },
         help: { type: "boolean", short: "h" },
@@ -330,6 +352,7 @@ async function main(): Promise<void> {
     openai: runOpenai,
     claude: runClaude,
     opencode: runOpencode,
+    "deepseek-api": runDeepseek,
   };
 
   // plan 维度过滤：auth 配置决定启用哪些；"video" 类 plan 硬过滤（不归 auth 管，永不显示）。

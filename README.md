@@ -1,6 +1,6 @@
 <h1>ai-quota</h1>
 
-AI coding-plan quota (MiniMax / OpenAI Codex / Claude Code / OpenCode Go) and API usage budget in the terminal. Zero runtime dependencies, read-only GETs, no quota consumed.
+AI coding-plan quota (MiniMax / OpenAI Codex / Claude Code / OpenCode Go / DeepSeek API) and API usage budget in the terminal. Zero runtime dependencies, read-only GETs, no quota consumed.
 
 ## 1 Install
 
@@ -33,30 +33,39 @@ Auth: `MINIMAX_API_KEY` env only; OpenAI reads `~/.codex/auth.json`; Claude read
 
 ## 3 API daily usage budget
 
-`api-usage` shows **account balance** and a local **daily budget progress bar**. For DeepSeek, it reads `GET /user/balance`; this is a read-only balance check, not a model call.
+`api-usage` shows **account balance** and local **daily + weekly budget progress** for DeepSeek (`provider: deepseek-api`). It reads `GET /user/balance`; this is a read-only balance check, not a model call.
 
 ```bash
 export DEEPSEEK_API_KEY="sk-..."
 
-api-usage                         # default daily budget: 5 CNY
-api-usage --budget 5              # same as above
+api-usage                         # default daily 7 / weekly 35 CNY
+api-usage --budget 10             # override daily budget to 10 CNY
+api-usage --weekly-budget 50      # override weekly budget to 50 CNY
 api-usage --watch -i 30s          # refresh in place every 30s
-api-usage --reset-today           # reset today's baseline to current account balance
+api-usage --reset-today           # reset today's + this week's baseline
 api-usage --currency USD          # show USD balance if the account has USD balance_infos
 ```
 
 Output shape:
 
 ```text
-2026-07-01 09:30:00
-  provider       deepseek
-  account        ¥17.8200 total  (¥0.0000 granted + ¥17.8200 topped-up)
-  daily budget   ¥3.8200 left / ¥5.0000  ██████░░░░░░░░░░░░░░░░░░ 23.6% used
-  today spent    ¥1.1800 since 2026-07-01
-  day baseline   ¥19.0000  2026-07-01T00:05:01.000Z
+2026-07-02 20:20:04
+  provider       deepseek-api
+  account        ¥18.0700 total  (¥0.0000 granted + ¥18.0700 topped-up)
+  daily budget   ¥7.0000 left / ¥7.0000  ░░░░░░░░░░░░░░░░░░░░░░░░ 0.0% used
+  today spent    ¥0.0000 since 2026-07-02
+  day baseline   ¥18.0700  2026-07-02T12:20:04.949Z
+  weekly budget  ¥35.0000 left / ¥35.0000  ░░░░░░░░░░░░░░░░░░░░░░░░ 0.0% used
+  week spent     ¥0.0000 since 2026-W27
+  week baseline  ¥18.0700  2026-07-02T12:20:04.949Z
 ```
 
-For each local date, the first run stores that day's starting account balance in `~/.config/ai-quota/api-usage.json`. Running the command many times in one day reuses the same daily baseline; the next local date automatically gets a new baseline. Use `--reset-today` when you want to restart today's 5 元 budget window.
+State persisted in `~/.config/ai-quota/api-usage.json`:
+- **daily baseline** — first run of each local day stores that day's starting account balance; later runs compute `today used = dailyBaseline − current balance`.
+- **weekly baseline** — first run of each ISO week (Monday-start) stores that week's starting balance; later runs compute `week used = weeklyBaseline − current balance`.
+- `--reset-today` resets both baselines to the current balance.
+
+Budget amounts are persisted once set (CLI > env > state). Env vars: `DEEPSEEK_DAILY_BUDGET` / `DEEPSEEK_WEEKLY_BUDGET`. DeepSeek's public API only exposes `/user/balance`; this is a local baseline, not a server-side cap.
 
 ### 3.1 Watch mode
 
@@ -71,10 +80,13 @@ For each local date, the first run stores that day's starting account balance in
 
 | Flag                     | Description                                                                                         |
 | ------------------------ | --------------------------------------------------------------------------------------------------- |
-| `-p, --provider <minimax | openai                                                                                              | claude                         | opencode>` | Single provider (overrides auth config; default: all enabled) |
-| `-r, --region <cn        | intl>`                                                                                              | MiniMax endpoint (default`cn`) |
+| `-p, --provider <minimax|openai|claude|opencode|deepseek-api>` | Single provider (overrides auth config; default: all enabled) |
+| `-r, --region <cn|intl>` | MiniMax endpoint (default`cn`) |
 | `--codex-auth <PATH>`    | Codex auth (default`$CODEX_HOME/auth.json` or `~/.codex/auth.json`)                                 |
 | `--claude-auth <PATH>`   | Claude credentials (default`$CLAUDE_CONFIG_DIR/.credentials.json` or `~/.claude/.credentials.json`) |
+| `--deepseek-daily-budget <AMOUNT>` | DeepSeek daily budget override (default: 7) |
+| `--deepseek-weekly-budget <AMOUNT>` | DeepSeek weekly budget override (default: 35) |
+| `--deepseek-config <PATH>` | DeepSeek budget state file (default `~/.config/ai-quota/api-usage.json`) |
 | `-w, --watch`            | Refresh in place (implied by`-i`)                                                                   |
 | `-i, --interval <SECS>`  | Refresh interval (`30`/`30s`/`1m`, default `60`; implies `-w`)                                      |
 | `-h, --help`             | Show help                                                                                           |
@@ -162,5 +174,6 @@ Three read-only GETs, no side effects.
 | OpenAI Codex | OAuth JWT from`~/.codex/auth.json`            | `https://chatgpt.com/backend-api/wham/usage` — must use Codex-style headers; `api.openai.com` returns 401           |
 | Claude Code  | OAuth token from`~/.claude/.credentials.json` | `https://api.anthropic.com/api/oauth/usage` — requires `anthropic-beta: oauth-2025-04-20`                           |
 | OpenCode Go  | Cookie from `~/.config/ai-quota/opencode.env` | `https://opencode.ai/workspace/<id>/go` (HTML scrape) — see [OpenCode Go authorization](#opencode-go-authorization) |
+| DeepSeek API | `DEEPSEEK_API_KEY`                            | `https://api.deepseek.com/user/balance` — server only exposes current balance; daily/weekly via local baseline |
 
 OpenAI retries 3× on transient `UND_ERR_CONNECT_TIMEOUT` (Cloudflare). Claude retries 3× on transient network errors. See [claude-code-quota](https://github.com/aweussom/claude-code-quota) for the Claude endpoint reverse-engineering notes; [minimax-coding-plan-quota-query](https://github.com/yunluoxin/minimax-coding-plan-quota-query) for MiniMax; [opencode-quota](https://github.com/slkiser/opencode-quota) for the OpenCode Go dashboard scraping pattern.

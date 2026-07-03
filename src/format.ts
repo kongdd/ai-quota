@@ -54,7 +54,8 @@ function modelRank(name: string): number {
   if (shown.startsWith("claude")) return 0;
   if (shown.startsWith("codex")) return 1;
   if (shown.startsWith("minimax")) return 2;
-  return 3;
+  if (shown.startsWith("deepseek")) return 3;
+  return 4;
 }
 
 function renderCell(col: Col, m: ModelRemain, now: number, durWidth: number): string {
