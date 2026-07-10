@@ -6,10 +6,9 @@ import { homedir } from "node:os";
 export const KNOWN_PROVIDERS = ["minimax", "openai", "claude", "opencode", "deepseek-api"] as const;
 export type KnownProvider = (typeof KNOWN_PROVIDERS)[number];
 
-/** provider 内部的 plan —— 决定默认渲染时哪些 plan 行被隐藏。
- *  MiniMax video 被硬编码隐藏（不列入 KNOWN_PLANS，auth 也救不回来）。 */
-export const KNOWN_PLANS: readonly string[] = [];
-export type KnownPlan = string;
+/** provider 内部的 plan —— 决定默认渲染时哪些 plan 行被隐藏。 */
+export const KNOWN_PLANS = ["minimax-video"] as const;
+export type KnownPlan = (typeof KNOWN_PLANS)[number];
 
 /** 所有可被 `auth enable/disable` 操控的项目。 */
 export const KNOWN_ITEMS = [...KNOWN_PROVIDERS, ...KNOWN_PLANS] as const;
@@ -17,13 +16,14 @@ export type KnownItem = (typeof KNOWN_ITEMS)[number];
 
 export type AuthConfig = Partial<Record<KnownItem, boolean>>;
 
-/** 项目缺省值 —— 文件里没写明的项走这里。provider 默认启用；plan 列表为空（video 由 render 阶段硬过滤）。 */
-const DEFAULTS: Record<KnownProvider, boolean> = {
+/** 项目缺省值 —— provider 默认启用；可选 plan 默认禁用。 */
+const DEFAULTS: Record<KnownItem, boolean> = {
   minimax: true,
   openai: true,
   claude: true,
   opencode: true,
   "deepseek-api": true,
+  "minimax-video": false,
 };
 
 /** 配置文件路径：遵循 XDG，$XDG_CONFIG_HOME 未设时回退 ~/.config */
@@ -54,7 +54,7 @@ export function saveAuthConfig(cfg: AuthConfig): void {
 export function isEnabled(cfg: AuthConfig, name: string): boolean {
   const v = cfg[name as KnownItem];
   if (v === true || v === false) return v;
-  return DEFAULTS[name as KnownProvider] ?? true;
+  return DEFAULTS[name as KnownItem] ?? true;
 }
 
 /** 大小写不敏感地把用户传入的字符串归一到 KNOWN_ITEMS，未匹配返回 undefined。 */

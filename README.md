@@ -100,7 +100,7 @@ Env: `NO_COLOR=1`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `XDG_CONFIG_HOME`, `OPENCO
 
 Default behavior queries every **enabled** provider. The set is persisted at
 `$XDG_CONFIG_HOME/ai-quota/auth.json` (defaults to `~/.config/ai-quota/auth.json`).
-All four providers (`minimax`, `openai`, `claude`, `opencode`) are enabled out of the box.
+All five providers (`minimax`, `openai`, `claude`, `opencode`, `deepseek-api`) are enabled out of the box. The optional `minimax-video` plan is disabled by default.
 
 ```bash
 ai-quota auth list                          # show every provider/plan and its status
@@ -111,7 +111,7 @@ ai-quota auth disable <NAME>                # turn it off
 `--provider <NAME>` is a one-off override — it queries that provider even if it's
 disabled in the auth config. Use it for ad-hoc checks; the change doesn't persist.
 
-> MiniMax video plan is hardcoded off: it's not in `KNOWN_ITEMS`, so `auth enable minimax video` errors out and the video row never reaches the report.
+> Enable the MiniMax video plan with `ai-quota auth enable minimax-video`; disable it again with `ai-quota auth disable minimax-video`.
 
 ### 3.4 OpenCode Go authorization
 

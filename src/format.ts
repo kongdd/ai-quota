@@ -45,7 +45,7 @@ const COLS: [Col, Col] = [
 
 export function displayName(name: string): string {
   if (name === "general" || name === "MiniMax") return "minimax";
-  if (name === "video" || name === "MiniMax-video") return "minimax video";
+  if (name === "video" || name === "MiniMax-video") return "minimax-video";
   return name;
 }
 

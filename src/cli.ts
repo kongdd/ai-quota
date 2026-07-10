@@ -363,9 +363,8 @@ async function main(): Promise<void> {
     "deepseek-api": runDeepseek,
   };
 
-  // plan 维度过滤：auth 配置决定启用哪些；"video" 类 plan 硬过滤（不归 auth 管，永不显示）。
-  const planFilter = (name: string) =>
-    !name.toLowerCase().includes("video") && isEnabled(authCfg, name);
+  // plan 维度过滤：auth 配置决定启用哪些。
+  const planFilter = (name: string) => isEnabled(authCfg, name);
 
   // 传 --watch 或 --interval 都进入 watch 模式；未指定 interval 时走默认 60s
   if (values.watch || values.interval !== undefined) {
