@@ -147,11 +147,16 @@ function handleAuthSubcommand(args: string[]): void {
   die(`unknown auth command: ${cmd}\n\n${AUTH_HELP}`);
 }
 
+/** Resolve the MiniMax API key. `MINIMAX_CN_API_KEY` wins over the legacy `MINIMAX_API_KEY`. */
+function minimaxApiKey(): string | undefined {
+  return process.env.MINIMAX_CN_API_KEY ?? process.env.MINIMAX_API_KEY;
+}
+
 async function runMinimax(values: Record<string, unknown>): Promise<ModelRemain[]> {
   const region = values.region as Region;
   if (region !== "cn" && region !== "intl") throw new Error(`--region must be cn or intl`);
-  const key = process.env.MINIMAX_API_KEY;
-  if (!key) throw new Error("API key required: set MINIMAX_API_KEY env");
+  const key = minimaxApiKey();
+  if (!key) throw new Error("API key required: set MINIMAX_CN_API_KEY or MINIMAX_API_KEY env");
   const data = await queryMinimax(key, region);
   return data.model_remains;
 }

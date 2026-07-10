@@ -29,7 +29,7 @@ ai-quota auth disable opencode            # skip a provider next time
 ai-quota auth enable opencode             # bring it back
 ```
 
-Auth: `MINIMAX_API_KEY` env only; OpenAI reads `~/.codex/auth.json`; Claude reads `~/.claude/.credentials.json`; OpenCode reads `~/.config/ai-quota/opencode.env`. A missing provider doesn't abort the others.
+Auth: `MINIMAX_CN_API_KEY` (preferred) or `MINIMAX_API_KEY` env; OpenAI reads `~/.codex/auth.json`; Claude reads `~/.claude/.credentials.json`; OpenCode reads `~/.config/ai-quota/opencode.env`. A missing provider doesn't abort the others.
 
 ## 3 API daily usage budget
 
@@ -172,7 +172,7 @@ Three read-only GETs, no side effects.
 
 | Provider     | Auth                                          | Endpoint                                                                                                            |
 | ------------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| MiniMax      | `MINIMAX_API_KEY`                             | `https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains` (intl: `minimax.io`)                             |
+| MiniMax      | `MINIMAX_CN_API_KEY` (fallback `MINIMAX_API_KEY`) | `https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains` (intl: `minimax.io`)                        |
 | OpenAI Codex | OAuth JWT from`~/.codex/auth.json`            | `https://chatgpt.com/backend-api/wham/usage` — must use Codex-style headers; `api.openai.com` returns 401           |
 | Claude Code  | OAuth token from`~/.claude/.credentials.json` | `https://api.anthropic.com/api/oauth/usage` — requires `anthropic-beta: oauth-2025-04-20`                           |
 | OpenCode Go  | Cookie from `~/.config/ai-quota/opencode.env` | `https://opencode.ai/workspace/<id>/go` (HTML scrape) — see [OpenCode Go authorization](#opencode-go-authorization) |
