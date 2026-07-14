@@ -11,8 +11,8 @@
 - [x] Claude code         : `~/.claude/.credentials.json`
 - [x] OpenAI Codex        : `~/.codex/auth.json`
 - [x] Grok build          : `~/.pi/agent/auth.json`
-- [x] Minimax coding plan : `MINIMAX_CN_API_KEY` or `MINIMAX_API_KEY` env
 - [x] Opencode go         : `~/.config/ai-quota/opencode.env`
+- [x] Minimax coding plan : `MINIMAX_CN_API_KEY` or `MINIMAX_API_KEY` env
 - [x] DeepSeek API        : `DEEPSEEK_API_KEY`
 
 ## 2 Usage

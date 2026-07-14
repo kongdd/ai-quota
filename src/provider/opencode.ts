@@ -2,6 +2,10 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ModelRemain, QuotaResponse } from "./minimax.js";
+import {
+  resolveOpencodeGoLongWindowForQuery,
+  type OpencodeGoLongWindow,
+} from "../opencode-config.js";
 
 /** OpenCode account server 默认地址 —— 自建可设 `$OPENCODE_SERVER` 覆盖 */
 const DEFAULT_SERVER = "https://opencode.ai";
@@ -33,28 +37,34 @@ function defaultEnvPath(): string {
   return join(homedir(), ".config", "ai-quota", "opencode.env");
 }
 
+type OpencodeEnvVars = {
+  workspaceId?: string;
+  authCookie?: string;
+};
+
+function loadOpencodeEnvFile(): OpencodeEnvVars {
+  const out: OpencodeEnvVars = {};
+  try {
+    const raw = readFileSync(defaultEnvPath(), "utf8");
+    for (const line of raw.split(/\r?\n/)) {
+      const m = /^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
+      if (!m) continue;
+      const [, key, val] = m;
+      const unquoted = val!.replace(/^['"]|['"]$/g, "");
+      if (key === "OPENCODE_GO_WORKSPACE_ID" && out.workspaceId === undefined) out.workspaceId = unquoted;
+      else if (key === "OPENCODE_GO_AUTH_COOKIE" && out.authCookie === undefined) out.authCookie = unquoted;
+    }
+  } catch {
+    // 文件不存在/不可读 → 静默忽略
+  }
+  return out;
+}
+
 /** 从环境变量（或自动加载的 `opencode.env`）读 dashboard 抓取配置；任一缺失返回 undefined */
 export function loadOpencodeGoConfig(): OpencodeGoConfig | undefined {
-  let workspaceId = process.env.OPENCODE_GO_WORKSPACE_ID?.trim();
-  let authCookie = process.env.OPENCODE_GO_AUTH_COOKIE?.trim();
-
-  // 从平台相关的 env 文件自动加载（仅当 env 没设；shell-style KEY=VALUE，可带 export）
-  if (!workspaceId || !authCookie) {
-    try {
-      const raw = readFileSync(defaultEnvPath(), "utf8");
-      for (const line of raw.split(/\r?\n/)) {
-        const m = /^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
-        if (!m) continue;
-        const [, key, val] = m;
-        const unquoted = val!.replace(/^['"]|['"]$/g, "");
-        if (key === "OPENCODE_GO_WORKSPACE_ID" && !workspaceId) workspaceId = unquoted;
-        else if (key === "OPENCODE_GO_AUTH_COOKIE" && !authCookie) authCookie = unquoted;
-      }
-    } catch {
-      // 文件不存在/不可读 → 静默忽略
-    }
-  }
-
+  const file = loadOpencodeEnvFile();
+  const workspaceId = (process.env.OPENCODE_GO_WORKSPACE_ID?.trim() || file.workspaceId)?.trim();
+  const authCookie = (process.env.OPENCODE_GO_AUTH_COOKIE?.trim() || file.authCookie)?.trim();
   if (!workspaceId || !authCookie) return undefined;
   return { workspaceId, authCookie };
 }
@@ -63,7 +73,8 @@ export function loadOpencodeGoConfig(): OpencodeGoConfig | undefined {
  * Dashboard HTML 解析 —— SolidJS SSR 输出格式：
  *   `rollingUsage:$R[N]={status:"ok",resetInSec:12640,usagePercent:5}`
  *   `weeklyUsage:$R[N]={status:"ok",resetInSec:588526,usagePercent:67.2}`
- * monthly 字段虽然存在但不渲染（控制台单独看），省去解析开销。
+ *   `monthlyUsage:$R[N]={status:"ok",resetInSec:...,usagePercent:...}`
+ * 展示：rolling → interval；weekly 或 monthly → 第二列（`ai-quota config long 1w|1m`）。
  * ------------------------------------------------------------------ */
 
 const NUM = String.raw`(-?\d+(?:\.\d+)?)`;
@@ -75,6 +86,7 @@ const RE_SSR_WINDOW = (field: string): RegExp[] => [
 
 const RE_ROLLING = RE_SSR_WINDOW("rollingUsage");
 const RE_WEEKLY = RE_SSR_WINDOW("weeklyUsage");
+const RE_MONTHLY = RE_SSR_WINDOW("monthlyUsage");
 
 function parseSsrWindow(html: string, patterns: RegExp[]): ScrapedWindow | null {
   for (const re of patterns) {
@@ -88,29 +100,53 @@ function parseSsrWindow(html: string, patterns: RegExp[]): ScrapedWindow | null 
   return null;
 }
 
-/** 把 rolling/weekly 两窗口归一到单行 ModelRemain（5h → interval、weekly → weekly）。
- *  ponytail: 不支持单字段缺失 —— SSR 是 all-or-nothing，要么三个都有要么全没。 */
-function windowsToModelRemains(windows: { rolling: ScrapedWindow; weekly: ScrapedWindow }): ModelRemain[] {
-  const now = Date.now();
-  const fill = (w: ScrapedWindow): { remaining_percent: number; remains_time: number; end_time: number; status: number } => {
-    const usage = Math.max(0, Math.min(100, w.usagePercent));
-    const endMs = now + Math.max(0, w.resetInSec) * 1000;
-    return {
-      remaining_percent: 100 - usage,
-      remains_time: Math.max(0, endMs - now),
-      end_time: endMs,
-      status: usage >= 100 ? 3 : 1,
-    };
+function fillWindow(w: ScrapedWindow, now: number) {
+  const usage = Math.max(0, Math.min(100, w.usagePercent));
+  const endMs = now + Math.max(0, w.resetInSec) * 1000;
+  return {
+    remaining_percent: 100 - usage,
+    remains_time: Math.max(0, endMs - now),
+    end_time: endMs,
+    status: usage >= 100 ? 3 : 1,
   };
-  return [{ model_name: "opencode-go", interval: fill(windows.rolling), weekly: fill(windows.weekly) }];
 }
 
-/** 从 dashboard HTML 抓 rolling/weekly 两窗口的使用率。
+/** rolling → interval；long → weekly 列。 */
+function windowsToModelRemains(windows: { rolling: ScrapedWindow; long: ScrapedWindow }): ModelRemain[] {
+  const now = Date.now();
+  return [{ model_name: "opencode-go", interval: fillWindow(windows.rolling, now), weekly: fillWindow(windows.long, now) }];
+}
+
+/** rolling / weekly / monthly → 三列（5h / 1w / 1m）。 */
+function windowsToModelRemainsAll(windows: {
+  rolling: ScrapedWindow;
+  weekly: ScrapedWindow;
+  monthly: ScrapedWindow;
+}): ModelRemain[] {
+  const now = Date.now();
+  return [
+    {
+      model_name: "opencode-go",
+      interval: fillWindow(windows.rolling, now),
+      weekly: fillWindow(windows.weekly, now),
+      monthly: fillWindow(windows.monthly, now),
+    },
+  ];
+}
+
+/** 从 dashboard HTML 抓 rolling + 所选长窗口的使用率。
  *  cookie 失效 → 302 跳登录页（fetch with `redirect: "manual"` 把跳转换成 status 0 的 opaqueredirect）。 */
 export async function scrapeOpencodeGoDashboard(
   cfg: OpencodeGoConfig,
-  opts: { baseUrl?: string; timeoutMs?: number } = {},
+  opts: {
+    baseUrl?: string;
+    timeoutMs?: number;
+    longWindow?: OpencodeGoLongWindow;
+    allWindows?: boolean;
+  } = {},
 ): Promise<ModelRemain[]> {
+  const allWindows = opts.allWindows === true;
+  const longWindow = opts.longWindow ?? "monthly";
   const baseUrl = opts.baseUrl ?? process.env.OPENCODE_SERVER ?? DEFAULT_SERVER;
   const url = `${baseUrl}/workspace/${encodeURIComponent(cfg.workspaceId)}/go`;
   const ctrl = new AbortController();
@@ -137,10 +173,19 @@ export async function scrapeOpencodeGoDashboard(
 
     const rolling = parseSsrWindow(html, RE_ROLLING);
     const weekly = parseSsrWindow(html, RE_WEEKLY);
-    if (!rolling || !weekly) {
-      throw new OpencodeAuthError("dashboard parse failed: rolling/weekly usage not found", false);
+    const monthly = parseSsrWindow(html, RE_MONTHLY);
+    if (allWindows) {
+      if (!rolling || !weekly || !monthly) {
+        throw new OpencodeAuthError("dashboard parse failed: rolling/weekly/monthly usage not found", false);
+      }
+      return windowsToModelRemainsAll({ rolling, weekly, monthly });
     }
-    return windowsToModelRemains({ rolling, weekly });
+    const long = longWindow === "weekly" ? weekly : monthly;
+    const longLabel = longWindow === "weekly" ? "weeklyUsage" : "monthlyUsage";
+    if (!rolling || !long) {
+      throw new OpencodeAuthError(`dashboard parse failed: rolling/${longLabel} not found`, false);
+    }
+    return windowsToModelRemains({ rolling, long });
   } catch (e) {
     if (e instanceof OpencodeAuthError) throw e;
     throw new OpencodeAuthError(`dashboard: ${e instanceof Error ? e.message : String(e)}`, true);
@@ -151,13 +196,13 @@ export async function scrapeOpencodeGoDashboard(
 
 /**
  * 拉取 OpenCode Go 配额：抓取 workspace dashboard 页面，
- * 正则解析 rolling + weekly 两窗口的使用率。
+ * 正则解析 rolling + weekly|monthly（次列由 longWindow 决定，默认 monthly）。
  *
  * 需要设 `OPENCODE_GO_WORKSPACE_ID` + `OPENCODE_GO_AUTH_COOKIE`，
  * 可通过 env 或 `~/.config/ai-quota/opencode.env` 配置。
  */
 export async function queryQuota(
-  opts: { timeoutMs?: number } = {},
+  opts: { timeoutMs?: number; longWindow?: OpencodeGoLongWindow; allWindows?: boolean } = {},
 ): Promise<QuotaResponse> {
   const dashCfg = loadOpencodeGoConfig();
   if (!dashCfg) {
@@ -166,6 +211,9 @@ export async function queryQuota(
       false,
     );
   }
-  const items = await scrapeOpencodeGoDashboard(dashCfg, { timeoutMs: opts.timeoutMs });
+  const scrapeOpts: Parameters<typeof scrapeOpencodeGoDashboard>[1] = { timeoutMs: opts.timeoutMs };
+  if (opts.allWindows) scrapeOpts.allWindows = true;
+  else scrapeOpts.longWindow = opts.longWindow ?? resolveOpencodeGoLongWindowForQuery();
+  const items = await scrapeOpencodeGoDashboard(dashCfg, scrapeOpts);
   return { base_resp: { status_code: 0, status_msg: "ok" }, model_remains: items };
 }

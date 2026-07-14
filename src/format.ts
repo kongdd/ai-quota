@@ -39,10 +39,33 @@ interface Col {
   get: (m: ModelRemain) => { remaining: number; endTime: number };
 }
 
-const COLS: [Col, Col] = [
+const COLS_TWO: Col[] = [
   { get: (m) => ({ remaining: m.interval.remaining_percent, endTime: m.interval.end_time }) },
   { get: (m) => ({ remaining: m.weekly.remaining_percent, endTime: m.weekly.end_time }) },
 ];
+
+const COLS_OPENCODE_THREE: Col[] = [
+  { get: (m) => ({ remaining: m.interval.remaining_percent, endTime: m.interval.end_time }) },
+  { get: (m) => ({ remaining: m.weekly.remaining_percent, endTime: m.weekly.end_time }) },
+  {
+    get: (m) => ({
+      remaining: m.monthly?.remaining_percent ?? 0,
+      endTime: m.monthly?.end_time ?? 0,
+    }),
+  },
+];
+
+function isOpencodeThreeCol(m: ModelRemain): boolean {
+  return displayName(m.model_name).startsWith("opencode") && m.monthly !== undefined;
+}
+
+function colsForModel(m: ModelRemain): Col[] {
+  return isOpencodeThreeCol(m) ? COLS_OPENCODE_THREE : COLS_TWO;
+}
+
+function maxCols(items: ModelRemain[]): number {
+  return items.some(isOpencodeThreeCol) ? 3 : 2;
+}
 
 export function displayName(name: string): string {
   if (name === "general" || name === "MiniMax") return "minimax";
@@ -54,9 +77,9 @@ function modelRank(name: string): number {
   const shown = displayName(name);
   if (shown.startsWith("claude")) return 0;
   if (shown.startsWith("codex")) return 1;
-  if (shown.startsWith("minimax")) return 2;
+  if (shown.startsWith("grok")) return 2;
   if (shown.startsWith("opencode")) return 3;
-  if (shown.startsWith("grok")) return 4;
+  if (shown.startsWith("minimax")) return 4;
   if (shown.startsWith("deepseek")) return 99;
   return 5;
 }
@@ -95,23 +118,32 @@ export function renderReport(
     return byRank || displayName(a.model_name).localeCompare(displayName(b.model_name));
   });
 
-  // 先求每列 duration 的最大显示宽度（让短 duration 右对齐到该宽度）
-  const durWidths = COLS.map((col) =>
-    Math.max(...sorted.map((m) => fmtDuration(col.get(m).endTime - now).length)),
+  const nCols = maxCols(sorted);
+  const durWidths = Array.from({ length: nCols }, (_, i) =>
+    Math.max(
+      ...sorted.map((m) => {
+        const cols = colsForModel(m);
+        const col = cols[i];
+        return col ? fmtDuration(col.get(m).endTime - now).length : 0;
+      }),
+    ),
   );
 
-  // 预渲染所有单元格，按列取最大显示宽度
-  const cells = sorted.map((m) =>
-    COLS.map((col, i) => renderCell(col, m, now, durWidths[i] ?? 0)),
+  const cells = sorted.map((m) => {
+    const cols = colsForModel(m);
+    return cols.map((col, i) => renderCell(col, m, now, durWidths[i] ?? 0));
+  });
+  const colWidths = Array.from({ length: nCols }, (_, i) =>
+    Math.max(...cells.map((row) => stripAnsi(row[i] ?? "").length)),
   );
-  const colWidths = COLS.map((_, i) => Math.max(...cells.map((row) => stripAnsi(row[i] ?? "").length)));
   const lines: string[] = [fmtTime(now)];
 
   sorted.forEach((m, r) => {
-    const first = padVisible(cells[r]?.[0] ?? "", colWidths[0] ?? 0);
+    const rowCells = cells[r] ?? [];
+    const first = padVisible(rowCells[0] ?? "", colWidths[0] ?? 0);
     const tail = m.balance
       ? ` ${money(m.balance.amount, m.balance.currency)}`
-      : (cells[r] ?? []).slice(1).map((cell, i) => ` ${padVisible(cell, colWidths[i + 1] ?? 0)}`).join("");
+      : rowCells.slice(1).map((cell, i) => ` ${padVisible(cell, colWidths[i + 1] ?? 0)}`).join("");
     const row =
       "  " +
       displayName(m.model_name).padEnd(14) +

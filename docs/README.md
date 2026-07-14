@@ -52,6 +52,7 @@ OpenCode Go quota is read by scraping the workspace dashboard at `opencode.ai/wo
 | `OPENCODE_GO_WORKSPACE_ID` | env or `~/.config/ai-quota/opencode.env` | URL when visiting the Go dashboard: `/workspace/wrk_xxxxxxxx/go`   |
 | `OPENCODE_GO_AUTH_COOKIE`  | env or `~/.config/ai-quota/opencode.env` | Browser DevTools → Application → Cookies → `auth` on `opencode.ai` |
 
+
 **One-time setup**
 
 ```bash
@@ -77,6 +78,22 @@ EOF
 ```
 
 Run `ai-quota --provider opencode` (no `source` needed — the file is auto-loaded). The `auth` cookie is valid for **~1 year** from issue; if scraping suddenly fails with `dashboard auth failed`, re-extract from DevTools.
+
+**Week vs month quota (second column)** — only OpenCode Go supports switching. Default is **1m** (monthly). Persist with:
+
+```bash
+ai-quota config long        # print current: 1w or 1m
+ai-quota config long 1w     # second column = weekly quota
+ai-quota config long 1m     # second column = monthly quota
+```
+
+Stored in `~/.config/ai-quota/config.json`. One-off override (does not write config):
+
+```bash
+ai-quota -p opencode --long       # three columns: rolling (~5h), 1w, 1m
+ai-quota -p opencode --long 1w    # two columns; second = week (this run only)
+ai-quota -p opencode --long 1m    # two columns; second = month (this run only)
+```
 
 **Override paths**
 

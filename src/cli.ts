@@ -8,6 +8,13 @@ import { queryQuota as queryMinimax, QuotaError, type ModelRemain, type Region }
 import { queryQuota as queryOpenai, CodexAuthError, loadCodexToken } from "./provider/openai.js";
 import { queryQuota as queryClaude, ClaudeAuthError, loadClaudeToken } from "./provider/claude.js";
 import { queryQuota as queryOpencode, OpencodeAuthError } from "./provider/opencode.js";
+import {
+  aiQuotaConfigPath,
+  getOpencodeGoLongPeriod,
+  parseOpencodeGoLongPeriod,
+  periodToLongWindow,
+  setOpencodeGoLongPeriod,
+} from "./opencode-config.js";
 import { computeDeepseekUsage, DeepSeekUsageError, defaultStatePath } from "./provider/deepseek.js";
 import { queryQuota as queryGrok, GrokAuthError } from "./provider/grok.js";
 import { renderReport, dim, displayName } from "./format.js";
@@ -42,6 +49,7 @@ Use --provider to limit to a single one. Use --watch to refresh periodically in 
 
 Options:
   -p, --provider <minimax|openai|claude|opencode|deepseek-api|grok>  Single provider (default: all enabled)
+      --long [1w|1m]               OpenCode Go: omit value → 5h+1w+1m columns; 1w|1m → second column (else config)
   -r, --region <cn|intl>           MiniMax endpoint (default: cn)
       --codex-auth <PATH>          Codex auth.json path (default: \$CODEX_HOME/auth.json or ~/.codex/auth.json)
       --claude-auth <PATH>         Claude credentials path (default: \$CLAUDE_CONFIG_DIR/.credentials.json or ~/.claude/.credentials.json)
@@ -59,6 +67,8 @@ Subcommands:
   ai-quota auth list                        Show enabled/disabled status of providers and plans
   ai-quota auth enable <NAME>               Enable a provider or plan
   ai-quota auth disable <NAME>              Disable a provider or plan
+  ai-quota config long                      Show OpenCode Go second-column period (1w or 1m)
+  ai-quota config long <1w|1m>              Set OpenCode Go week vs month quota display
 `;
 
 const AUTH_HELP = `ai-quota auth — manage which providers and plans are queried
@@ -73,6 +83,18 @@ Commands:
 Known names: ${KNOWN_PROVIDERS.join(", ")}, ${KNOWN_PLANS.join(", ")}
 
 Config file: ${authConfigPath()} (overridable via \$XDG_CONFIG_HOME)
+`;
+
+const CONFIG_HELP = `ai-quota config — OpenCode Go display preferences
+
+Usage: ai-quota config long [1w|1m]
+
+  long           Print current second-column period (default 1m)
+  long 1w        Use weekly quota on opencode-go reports
+  long 1m        Use monthly quota on opencode-go reports (default)
+
+Config file: ${aiQuotaConfigPath()}
+One-off: ai-quota -p opencode --long 1w | ai-quota -p opencode --long (three columns)
 `;
 
 function die(msg: string): never {
@@ -150,6 +172,32 @@ function handleAuthSubcommand(args: string[]): void {
   die(`unknown auth command: ${cmd}\n\n${AUTH_HELP}`);
 }
 
+/** `ai-quota config long [1w|1m]` — 仅 OpenCode Go 第二列周/月额度。 */
+function handleConfigSubcommand(args: string[]): void {
+  const section = args[0];
+  if (section !== "long") {
+    if (section === undefined || section === "help" || section === "-h" || section === "--help") {
+      process.stdout.write(CONFIG_HELP);
+      return;
+    }
+    die(`unknown config section: ${section}. Use: long\n\n${CONFIG_HELP}`);
+  }
+
+  const periodArg = args[1];
+  if (periodArg === undefined) {
+    process.stdout.write(`${getOpencodeGoLongPeriod()}\n`);
+    return;
+  }
+
+  try {
+    const period = parseOpencodeGoLongPeriod(periodArg);
+    setOpencodeGoLongPeriod(period);
+    process.stdout.write(`ai-quota: OpenCode Go long window set to ${period}\n`);
+  } catch (e) {
+    die(e instanceof Error ? e.message : String(e));
+  }
+}
+
 /** Resolve the MiniMax API key. `MINIMAX_CN_API_KEY` wins over the legacy `MINIMAX_API_KEY`. */
 function minimaxApiKey(): string | undefined {
   return process.env.MINIMAX_CN_API_KEY ?? process.env.MINIMAX_API_KEY;
@@ -178,7 +226,16 @@ async function runClaude(values: Record<string, unknown>): Promise<ModelRemain[]
   return data.model_remains;
 }
 
-async function runOpencode(_values: Record<string, unknown>): Promise<ModelRemain[]> {
+async function runOpencode(values: Record<string, unknown>): Promise<ModelRemain[]> {
+  if (values["opencode-long-all"] === true) {
+    const data = await queryOpencode({ allWindows: true });
+    return data.model_remains;
+  }
+  const longRaw = values.long as string | undefined;
+  if (longRaw) {
+    const data = await queryOpencode({ longWindow: periodToLongWindow(parseOpencodeGoLongPeriod(longRaw)) });
+    return data.model_remains;
+  }
   const data = await queryOpencode();
   return data.model_remains;
 }
@@ -309,13 +366,35 @@ async function main(): Promise<void> {
     handleAuthSubcommand(argv.slice(1));
     return;
   }
+  if (argv[0] === "config") {
+    handleConfigSubcommand(argv.slice(1));
+    return;
+  }
+
+  let opencodeLongAll = false;
+  const parseArgv: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]!;
+    if (a === "--long") {
+      const next = argv[i + 1];
+      if (next === undefined || next.startsWith("-")) {
+        opencodeLongAll = true;
+        continue;
+      }
+      parseArgv.push(a, next);
+      i++;
+      continue;
+    }
+    parseArgv.push(a);
+  }
 
   let values: Record<string, unknown>;
   try {
     ({ values } = parseArgs({
-      args: argv,
+      args: parseArgv,
       options: {
         provider: { type: "string", short: "p" },
+        long: { type: "string" },
         region: { type: "string", short: "r", default: "cn" },
         "codex-auth": { type: "string" },
         "claude-auth": { type: "string" },
@@ -340,6 +419,8 @@ async function main(): Promise<void> {
     const msg = e instanceof Error ? e.message : String(e);
     die(code === "ERR_PARSE_ARGS_UNKNOWN_OPTION" ? msg : `${msg}\n\n${HELP}`);
   }
+
+  if (opencodeLongAll) values["opencode-long-all"] = true;
 
   if (values.help) {
     process.stdout.write(HELP);

@@ -32,6 +32,8 @@ export interface ModelRemain {
   model_name: string;
   interval: IntervalQuota;
   weekly: WeeklyQuota;
+  /** OpenCode Go：`--long` 无参时第三列月窗口 */
+  monthly?: WeeklyQuota;
   balance?: {
     amount: number;
     currency: string;
