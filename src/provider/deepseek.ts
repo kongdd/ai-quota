@@ -12,6 +12,7 @@ import type { ModelRemain } from "./minimax.js";
 const API = "https://api.deepseek.com";
 const DEFAULT_DAILY = 7;
 const DEFAULT_WEEKLY = 35;
+const DEFAULT_MONTHLY = 70;
 
 interface BalanceInfo {
   currency: string;
@@ -37,6 +38,7 @@ export interface DeepseekComputeOptions {
   currency?: string;
   dailyBudget?: string;
   weeklyBudget?: string;
+  monthlyBudget?: string;
   resetToday?: boolean;
   configPath?: string;
   now?: Date;
@@ -56,16 +58,24 @@ export interface DeepseekComputeResult {
     isAvailable: boolean;
     dailyBudget: number;
     weeklyBudget: number;
+    monthlyBudget: number;
     baselineBalance: number;
     weekBaselineBalance: number;
+    monthBaselineBalance: number;
     todayUsed: number;
     todayLeft: number;
     todayUsedPercent: number;
     weekUsed: number;
     weekLeft: number;
     weekUsedPercent: number;
+    monthUsed: number;
+    monthLeft: number;
+    monthUsedPercent: number;
+    month: string;
+    monthStart: string;
     baselineCreatedAt: string;
     weekBaselineCreatedAt: string;
+    monthBaselineCreatedAt: string;
     statePath: string;
     resetToday: boolean;
   };
@@ -139,13 +149,15 @@ export async function computeDeepseekUsage(opts: DeepseekComputeOptions): Promis
     aliases: ["deepseek"],
     defaultDailyBudget: DEFAULT_DAILY,
     defaultWeeklyBudget: DEFAULT_WEEKLY,
+    defaultMonthlyBudget: DEFAULT_MONTHLY,
   });
   const currency = (opts.currency ?? process.env.DEEPSEEK_CURRENCY ?? savedState?.currency ?? "CNY").toUpperCase();
   const state = savedState?.currency.toUpperCase() === currency
     ? savedState
-    : emptyLedgerState("deepseek-api", currency, DEFAULT_DAILY, DEFAULT_WEEKLY);
+    : emptyLedgerState("deepseek-api", currency, DEFAULT_DAILY, DEFAULT_WEEKLY, DEFAULT_MONTHLY);
   const dailyBudget = budget(opts.dailyBudget, ["DEEPSEEK_DAILY_BUDGET", "DEEPSEEK_BUDGET"], state.dailyBudget, "--budget");
   const weeklyBudget = budget(opts.weeklyBudget, ["DEEPSEEK_WEEKLY_BUDGET"], state.weeklyBudget, "--weekly-budget");
+  const monthlyBudget = budget(opts.monthlyBudget, ["DEEPSEEK_MONTHLY_BUDGET"], state.monthlyBudget, "--monthly-budget");
   const resetToday = opts.resetToday === true;
 
   const data = await queryBalance(opts.apiKey);
@@ -155,13 +167,21 @@ export async function computeDeepseekUsage(opts: DeepseekComputeOptions): Promis
   const toppedUpBalance = money(info.topped_up_balance, "topped_up_balance");
 
   state.currency = currency;
-  const usage = recordBalanceUsage(state, { balance: accountBalance, now, reset: resetToday, dailyBudget, weeklyBudget });
+  const usage = recordBalanceUsage(state, {
+    balance: accountBalance,
+    now,
+    reset: resetToday,
+    dailyBudget,
+    weeklyBudget,
+    monthlyBudget,
+  });
   saveLedgerState(statePath, state);
 
   const modelRemains: ModelRemain[] = [{
     model_name: "deepseek-api",
-    interval: quota(usage.today.percent, windowEnd(now), nowMs),
-    weekly: quota(usage.weekUsage.percent, windowEnd(now, true), nowMs),
+    interval: quota(usage.today.percent, windowEnd(now, "day"), nowMs),
+    weekly: quota(usage.weekUsage.percent, windowEnd(now, "week"), nowMs),
+    monthly: quota(usage.monthUsage.percent, windowEnd(now, "month"), nowMs),
     balance: { amount: accountBalance, currency },
   }];
 
@@ -179,16 +199,24 @@ export async function computeDeepseekUsage(opts: DeepseekComputeOptions): Promis
       isAvailable: data.is_available,
       dailyBudget,
       weeklyBudget,
+      monthlyBudget,
       baselineBalance: usage.dayRecord.baseline_balance,
       weekBaselineBalance: usage.weekRecord.baseline_balance,
+      monthBaselineBalance: usage.monthRecord.baseline_balance,
       todayUsed: usage.today.used,
       todayLeft: usage.today.left,
       todayUsedPercent: usage.today.percent,
       weekUsed: usage.weekUsage.used,
       weekLeft: usage.weekUsage.left,
       weekUsedPercent: usage.weekUsage.percent,
+      monthUsed: usage.monthUsage.used,
+      monthLeft: usage.monthUsage.left,
+      monthUsedPercent: usage.monthUsage.percent,
+      month: usage.month,
+      monthStart: usage.monthStart,
       baselineCreatedAt: usage.dayRecord.created_at,
       weekBaselineCreatedAt: usage.weekRecord.created_at,
+      monthBaselineCreatedAt: usage.monthRecord.created_at,
       statePath,
       resetToday,
     },

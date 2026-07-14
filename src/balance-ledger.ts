@@ -17,10 +17,12 @@ export interface BalanceLedgerState {
   currency: string;
   dailyBudget: number;
   weeklyBudget: number;
+  monthlyBudget: number;
   last_balance?: number;
   updated_at?: string;
   days: Record<string, LedgerRecord>;
   weeks: Record<string, LedgerRecord>;
+  months: Record<string, LedgerRecord>;
 }
 
 export interface UsageProgress {
@@ -33,10 +35,14 @@ export interface LedgerUpdate {
   day: string;
   week: string;
   weekStart: string;
+  month: string;
+  monthStart: string;
   dayRecord: LedgerRecord;
   weekRecord: LedgerRecord;
+  monthRecord: LedgerRecord;
   today: UsageProgress;
   weekUsage: UsageProgress;
+  monthUsage: UsageProgress;
 }
 
 export function defaultLedgerPath(file = "api-usage.json"): string {
@@ -48,13 +54,20 @@ export function emptyLedgerState(
   currency: string,
   dailyBudget: number,
   weeklyBudget: number,
+  monthlyBudget: number,
 ): BalanceLedgerState {
-  return { provider, currency, dailyBudget, weeklyBudget, days: {}, weeks: {} };
+  return { provider, currency, dailyBudget, weeklyBudget, monthlyBudget, days: {}, weeks: {}, months: {} };
 }
 
 export function readLedgerState(
   path: string,
-  opts: { provider: string; aliases?: string[]; defaultDailyBudget: number; defaultWeeklyBudget: number },
+  opts: {
+    provider: string;
+    aliases?: string[];
+    defaultDailyBudget: number;
+    defaultWeeklyBudget: number;
+    defaultMonthlyBudget: number;
+  },
 ): BalanceLedgerState | undefined {
   if (!existsSync(path)) return undefined;
   const raw = JSON.parse(readFileSync(path, "utf8")) as Partial<BalanceLedgerState> & { provider?: string };
@@ -66,10 +79,12 @@ export function readLedgerState(
     currency: raw.currency,
     dailyBudget: positiveOr(raw.dailyBudget, opts.defaultDailyBudget),
     weeklyBudget: positiveOr(raw.weeklyBudget, opts.defaultWeeklyBudget),
+    monthlyBudget: positiveOr(raw.monthlyBudget, opts.defaultMonthlyBudget),
     last_balance: finiteNumber(raw.last_balance),
     updated_at: typeof raw.updated_at === "string" ? raw.updated_at : undefined,
     days: raw.days,
     weeks: raw.weeks ?? {},
+    months: raw.months ?? {},
   };
 }
 
@@ -87,41 +102,93 @@ export function resolveBudget(raw: string | undefined, envKeys: string[], saved:
 
 export function recordBalanceUsage(
   state: BalanceLedgerState,
-  opts: { balance: number; now: Date; reset: boolean; dailyBudget: number; weeklyBudget: number },
+  opts: {
+    balance: number;
+    now: Date;
+    reset: boolean;
+    dailyBudget: number;
+    weeklyBudget: number;
+    monthlyBudget: number;
+  },
 ): LedgerUpdate {
   const previousBalance = state.last_balance;
   const delta = opts.reset || previousBalance === undefined ? 0 : Math.max(0, previousBalance - opts.balance);
   const day = localDay(opts.now);
   const week = isoWeek(opts.now);
   const weekStart = weekStartDay(opts.now);
+  const month = calendarMonth(opts.now);
+  const monthStart = monthStartDay(opts.now);
 
   state.dailyBudget = opts.dailyBudget;
   state.weeklyBudget = opts.weeklyBudget;
+  state.monthlyBudget = opts.monthlyBudget;
   state.last_balance = opts.balance;
   state.updated_at = opts.now.toISOString();
 
   const dayRecord = updateRecord(state.days, day, opts.balance, opts.now, opts.reset, delta, previousBalance === undefined);
   const weekRecord = updateRecord(state.weeks, week, opts.balance, opts.now, opts.reset, delta, previousBalance === undefined);
+  const monthRecord = updateRecord(state.months, month, opts.balance, opts.now, opts.reset, delta, previousBalance === undefined);
   if (previousBalance === undefined) {
     migrateLegacyRecord(dayRecord, opts.balance);
     migrateLegacyRecord(weekRecord, opts.balance);
+    migrateLegacyRecord(monthRecord, opts.balance);
   }
 
   return {
     day,
     week,
     weekStart,
+    month,
+    monthStart,
     dayRecord,
     weekRecord,
+    monthRecord,
     today: progress(dayRecord, opts.dailyBudget),
     weekUsage: progress(weekRecord, opts.weeklyBudget),
+    monthUsage: progress(monthRecord, opts.monthlyBudget),
   };
 }
 
-export function windowEnd(now: Date, weekly = false): number {
+/** Persist budget caps without querying account balance (used by `api-usage budget`). */
+export function persistBudgetCaps(
+  path: string,
+  caps: { weekly?: string; monthly?: string; daily?: string; currency?: string },
+  defaults: { daily: number; weekly: number; monthly: number },
+): BalanceLedgerState {
+  const saved = readLedgerState(path, {
+    provider: "deepseek-api",
+    aliases: ["deepseek"],
+    defaultDailyBudget: defaults.daily,
+    defaultWeeklyBudget: defaults.weekly,
+    defaultMonthlyBudget: defaults.monthly,
+  });
+  const currency = (caps.currency ?? saved?.currency ?? process.env.DEEPSEEK_CURRENCY ?? "CNY").toUpperCase();
+  const state =
+    saved?.currency.toUpperCase() === currency
+      ? saved
+      : emptyLedgerState("deepseek-api", currency, defaults.daily, defaults.weekly, defaults.monthly);
+
+  if (caps.daily !== undefined) state.dailyBudget = resolveBudget(caps.daily, ["DEEPSEEK_DAILY_BUDGET", "DEEPSEEK_BUDGET"], state.dailyBudget, "--budget");
+  if (caps.weekly !== undefined) state.weeklyBudget = resolveBudget(caps.weekly, ["DEEPSEEK_WEEKLY_BUDGET"], state.weeklyBudget, "-w");
+  if (caps.monthly !== undefined) state.monthlyBudget = resolveBudget(caps.monthly, ["DEEPSEEK_MONTHLY_BUDGET"], state.monthlyBudget, "-m");
+
+  saveLedgerState(path, state);
+  return state;
+}
+
+export function windowEnd(now: Date, mode: "day" | "week" | "month" = "day"): number {
   const d = new Date(now);
-  if (weekly) d.setDate(d.getDate() + (8 - (d.getDay() || 7)));
-  d.setHours(weekly ? 0 : 24, 0, 0, 0);
+  if (mode === "week") {
+    d.setDate(d.getDate() + (8 - (d.getDay() || 7)));
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }
+  if (mode === "month") {
+    d.setMonth(d.getMonth() + 1, 1);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }
+  d.setHours(24, 0, 0, 0);
   return d.getTime();
 }
 
@@ -152,6 +219,16 @@ function weekStartDay(d: Date): string {
   const x = new Date(d);
   x.setDate(x.getDate() - ((x.getDay() || 7) - 1));
   return localDay(x);
+}
+
+function calendarMonth(d: Date): string {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${yyyy}-${mm}`;
+}
+
+function monthStartDay(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
 function updateRecord(

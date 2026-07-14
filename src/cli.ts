@@ -55,6 +55,7 @@ Options:
       --claude-auth <PATH>         Claude credentials path (default: \$CLAUDE_CONFIG_DIR/.credentials.json or ~/.claude/.credentials.json)
       --deepseek-daily-budget, --budget <AMOUNT>  DeepSeek daily budget override
       --deepseek-weekly-budget, --weekly-budget <AMOUNT> DeepSeek weekly budget override
+      --deepseek-monthly-budget, --monthly-budget <AMOUNT> DeepSeek monthly budget override
       --currency <CNY|USD>         DeepSeek balance currency (default: state/env/CNY)
       --deepseek-config, --config <PATH> DeepSeek budget state file (default: ~/.config/ai-quota/api-usage.json)
       --reset-today, --reset       Reset DeepSeek daily + weekly baselines
@@ -248,6 +249,7 @@ async function runDeepseek(values: Record<string, unknown>): Promise<ModelRemain
     currency: values.currency as string | undefined,
     dailyBudget: (values["deepseek-daily-budget"] ?? values.budget) as string | undefined,
     weeklyBudget: (values["deepseek-weekly-budget"] ?? values["weekly-budget"]) as string | undefined,
+    monthlyBudget: (values["deepseek-monthly-budget"] ?? values["monthly-budget"]) as string | undefined,
     resetToday: values["reset-today"] === true || values.reset === true,
     configPath: ((values["deepseek-config"] ?? values.config) as string | undefined) ?? defaultStatePath(),
   });
@@ -400,9 +402,11 @@ async function main(): Promise<void> {
         "claude-auth": { type: "string" },
         "deepseek-daily-budget": { type: "string" },
         "deepseek-weekly-budget": { type: "string" },
+        "deepseek-monthly-budget": { type: "string" },
         "deepseek-config": { type: "string" },
         budget: { type: "string" },
         "weekly-budget": { type: "string" },
+        "monthly-budget": { type: "string" },
         currency: { type: "string" },
         config: { type: "string" },
         "reset-today": { type: "boolean" },
