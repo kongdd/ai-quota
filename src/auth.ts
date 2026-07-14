@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
 /** 用户可独立启用/禁用的 provider —— 决定 `ai-quota` 默认查询哪些源。 */
-export const KNOWN_PROVIDERS = ["minimax", "openai", "claude", "opencode", "deepseek-api"] as const;
+export const KNOWN_PROVIDERS = ["minimax", "openai", "claude", "opencode", "deepseek-api", "grok"] as const;
 export type KnownProvider = (typeof KNOWN_PROVIDERS)[number];
 
 /** provider 内部的 plan —— 决定默认渲染时哪些 plan 行被隐藏。 */
@@ -23,6 +23,7 @@ const DEFAULTS: Record<KnownItem, boolean> = {
   claude: true,
   opencode: true,
   "deepseek-api": true,
+  grok: true,
   "minimax-video": false,
 };
 

@@ -20,6 +20,14 @@ export interface WeeklyQuota {
   status: number;
 }
 
+/** Token Plan 加速倍率（千分之一 permille；2000 表示 x2）。仅 MiniMax 系列可能存在。 */
+export interface QuotaBoost {
+  /** 5h 窗口加速倍率；≤1000 = 无加速 */
+  interval?: number;
+  /** 周窗口加速倍率 */
+  weekly?: number;
+}
+
 export interface ModelRemain {
   model_name: string;
   interval: IntervalQuota;
@@ -28,6 +36,8 @@ export interface ModelRemain {
     amount: number;
     currency: string;
   };
+  /** Token Plan 加速倍率（当前仅 MiniMax 返回） */
+  boost?: QuotaBoost;
 }
 
 export interface QuotaResponse {
@@ -42,9 +52,11 @@ export class QuotaError extends Error {
   }
 }
 
+// 注：`/v1/api/openplatform/coding_plan/remains` 旧路径仍被网关接收但返回 `status_code: 1004`，
+// 不再返回配额数据。MiniMax 已迁移到 Token Plan，详见 FAQ https://platform.minimaxi.com/docs/token-plan/faq
 const ENDPOINTS: Record<Region, string> = {
-  cn: "https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains",
-  intl: "https://api.minimax.io/v1/api/openplatform/coding_plan/remains",
+  cn: "https://api.minimaxi.com/v1/token_plan/remains",
+  intl: "https://api.minimax.io/v1/token_plan/remains",
 };
 
 /** 原始 API 响应字段（snake_case，外部接口） */
@@ -58,11 +70,15 @@ interface RawModelRemain {
   current_weekly_status: number;
   weekly_remains_time: number;
   weekly_end_time: number;
+  /** 5h 窗口配额倍率（千分之一，2000 = x2）。缺省表示无加速。 */
+  interval_boost_permille?: number;
+  /** 周窗口配额倍率（千分之一）。 */
+  weekly_boost_permille?: number;
 }
 
 /** 将原始字段归一化到内部结构 */
 function normalize(raw: RawModelRemain): ModelRemain {
-  return {
+  const out: ModelRemain = {
     model_name: raw.model_name,
     interval: {
       remaining_percent: raw.current_interval_remaining_percent,
@@ -77,6 +93,14 @@ function normalize(raw: RawModelRemain): ModelRemain {
       status: raw.current_weekly_status,
     },
   };
+  // boost 仅在至少一窗口显式返回时才输出；permille ≤ 1000 等价无加速，仍保留原始数值
+  if (raw.interval_boost_permille !== undefined || raw.weekly_boost_permille !== undefined) {
+    out.boost = {
+      interval: raw.interval_boost_permille,
+      weekly: raw.weekly_boost_permille,
+    };
+  }
+  return out;
 }
 
 export async function queryQuota(

@@ -29,6 +29,9 @@
     "codex",
     "claude",
     "opencode",
+    "grok",
+    "supergrok",
+    "xai",
     "quota",
     "cli",
     "coding-plan"

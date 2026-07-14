@@ -1,6 +1,6 @@
 <h1>ai-quota</h1>
 
-AI coding-plan quota (MiniMax / OpenAI Codex / Claude Code / OpenCode Go / DeepSeek API) and API usage budget in the terminal. Zero runtime dependencies, read-only GETs, no quota consumed.
+AI coding-plan quota (MiniMax / OpenAI Codex / Claude Code / OpenCode Go / DeepSeek API / Grok Build) and API usage budget in the terminal. Zero runtime dependencies, read-only GETs, no quota consumed.
 
 ## 1 Install
 
@@ -29,7 +29,7 @@ ai-quota auth disable opencode            # skip a provider next time
 ai-quota auth enable opencode             # bring it back
 ```
 
-Auth: `MINIMAX_CN_API_KEY` (preferred) or `MINIMAX_API_KEY` env; OpenAI reads `~/.codex/auth.json`; Claude reads `~/.claude/.credentials.json`; OpenCode reads `~/.config/ai-quota/opencode.env`. A missing provider doesn't abort the others.
+Auth: `MINIMAX_CN_API_KEY` (preferred) or `MINIMAX_API_KEY` env; OpenAI reads `~/.codex/auth.json`; Claude reads `~/.claude/.credentials.json`; OpenCode reads `~/.config/ai-quota/opencode.env`; Grok Build reads `grok-cli` OAuth from `~/.pi/agent/auth.json` (pi `/login`, fallback `~/.grok/auth.json`). A missing provider doesn't abort the others.
 
 ## 3 API daily usage budget
 
@@ -100,7 +100,7 @@ Env: `NO_COLOR=1`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `XDG_CONFIG_HOME`, `OPENCO
 
 Default behavior queries every **enabled** provider. The set is persisted at
 `$XDG_CONFIG_HOME/ai-quota/auth.json` (defaults to `~/.config/ai-quota/auth.json`).
-All five providers (`minimax`, `openai`, `claude`, `opencode`, `deepseek-api`) are enabled out of the box. The optional `minimax-video` plan is disabled by default.
+All six providers (`minimax`, `openai`, `claude`, `opencode`, `deepseek-api`, `grok`) are enabled out of the box. The optional `minimax-video` plan is disabled by default.
 
 ```bash
 ai-quota auth list                          # show every provider/plan and its status
@@ -165,6 +165,31 @@ export OPENCODE_SERVER=https://opencode.internal.example.com
 
 Without `OPENCODE_GO_WORKSPACE_ID` + `OPENCODE_GO_AUTH_COOKIE`, the OpenCode provider errors out. To disable the provider entirely: `ai-quota auth disable opencode`.
 
+### 3.5 Grok Build authorization
+
+Grok Build quota (SuperGrok / X Premium+ subscription) is read from the Grok Build CLI proxy at `cli-chat-proxy.grok.com`. Auth prefers the `grok-cli` OAuth entry in pi's `~/.pi/agent/auth.json` (written by pi `/login` / pi-grok-cli). Falls back to official `~/.grok/auth.json` if present. The same billing surface is what `grok /usage` and `pi-xai /xai-usage` query.
+
+**One-time setup**
+
+```bash
+# Preferred: log in via pi (writes ~/.pi/agent/auth.json → "grok-cli")
+# Inside pi:
+#   /login
+#   choose Grok CLI / grok-build
+
+# Or: official Grok CLI (fallback path)
+#   grok login   # writes ~/.grok/auth.json
+
+# Verify
+ai-quota --provider grok
+```
+
+Lookup order:
+1. `$PI_CONFIG_DIR/auth.json` or `~/.pi/agent/auth.json` — keys `grok-cli` then `grok-build` (`type: oauth`, field `access`)
+2. `~/.grok/auth.json` — canonical `https://auth.x.ai::<client-id>` or legacy `https://accounts.x.ai/sign-in`
+
+Without either credential, the Grok provider errors out. To disable: `ai-quota auth disable grok`. Plain `XAI_API_KEY` is **not** sufficient — the billing endpoint requires the subscription OAuth token.
+
 ## 4 How it works
 
 Three read-only GETs, no side effects.
@@ -177,5 +202,6 @@ Three read-only GETs, no side effects.
 | Claude Code  | OAuth token from`~/.claude/.credentials.json` | `https://api.anthropic.com/api/oauth/usage` — requires `anthropic-beta: oauth-2025-04-20`                           |
 | OpenCode Go  | Cookie from `~/.config/ai-quota/opencode.env` | `https://opencode.ai/workspace/<id>/go` (HTML scrape) — see [OpenCode Go authorization](#opencode-go-authorization) |
 | DeepSeek API | `DEEPSEEK_API_KEY`                            | `https://api.deepseek.com/user/balance` — server only exposes current balance; daily/weekly via local spend ledger |
+| Grok Build   | OAuth `grok-cli` from`~/.pi/agent/auth.json` (fallback `~/.grok/auth.json`) | `https://cli-chat-proxy.grok.com/v1/billing` (+ `?format=credits` for weekly pool) — see [Grok Build authorization](#grok-build-authorization) |
 
-OpenAI retries 3× on transient `UND_ERR_CONNECT_TIMEOUT` (Cloudflare). Claude retries 3× on transient network errors. See [claude-code-quota](https://github.com/aweussom/claude-code-quota) for the Claude endpoint reverse-engineering notes; [minimax-coding-plan-quota-query](https://github.com/yunluoxin/minimax-coding-plan-quota-query) for MiniMax; [opencode-quota](https://github.com/slkiser/opencode-quota) for the OpenCode Go dashboard scraping pattern.
+OpenAI retries 3× on transient `UND_ERR_CONNECT_TIMEOUT` (Cloudflare). Claude retries 3× on transient network errors. See [claude-code-quota](https://github.com/aweussom/claude-code-quota) for the Claude endpoint reverse-engineering notes; [minimax-coding-plan-quota-query](https://github.com/yunluoxin/minimax-coding-plan-quota-query) for MiniMax; [opencode-quota](https://github.com/slkiser/opencode-quota) for the OpenCode Go dashboard scraping pattern; [pi-xai](https://github.com/luxus/pi-xai) for the Grok Build billing surface (`xai-oauth.ts`).

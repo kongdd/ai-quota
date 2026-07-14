@@ -24,7 +24,8 @@ function fmtTime(epochMs: number): string {
 
 /** 把 0~100 的剩余百分比渲染成进度条（已用 = 100 - remaining） */
 function bar(remaining: number, w = 10): string {
-  const filled = Math.max(0, Math.min(w, Math.ceil(((100 - remaining) / 100) * w)));
+  // round（非 ceil）：0% 已用必须 0 格；ceil 会把 0.1% 也撑成 1 格
+  const filled = Math.max(0, Math.min(w, Math.round(((100 - remaining) / 100) * w)));
   return "█".repeat(filled) + "░".repeat(w - filled);
 }
 
@@ -55,6 +56,7 @@ function modelRank(name: string): number {
   if (shown.startsWith("codex")) return 1;
   if (shown.startsWith("minimax")) return 2;
   if (shown.startsWith("opencode")) return 3;
+  if (shown.startsWith("grok")) return 4;
   if (shown.startsWith("deepseek")) return 99;
   return 5;
 }

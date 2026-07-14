@@ -9,6 +9,7 @@ import { queryQuota as queryOpenai, CodexAuthError, loadCodexToken } from "./pro
 import { queryQuota as queryClaude, ClaudeAuthError, loadClaudeToken } from "./provider/claude.js";
 import { queryQuota as queryOpencode, OpencodeAuthError } from "./provider/opencode.js";
 import { computeDeepseekUsage, DeepSeekUsageError, defaultStatePath } from "./provider/deepseek.js";
+import { queryQuota as queryGrok, GrokAuthError } from "./provider/grok.js";
 import { renderReport, dim, displayName } from "./format.js";
 import {
   KNOWN_PROVIDERS,
@@ -29,10 +30,10 @@ const VERSION = (() => {
   }
 })();
 
-type Provider = "minimax" | "openai" | "claude" | "opencode" | "deepseek-api";
+type Provider = "minimax" | "openai" | "claude" | "opencode" | "deepseek-api" | "grok";
 type Runner = (v: Record<string, unknown>) => Promise<ModelRemain[]>;
 
-const HELP = `ai-quota — coding-plan quota for MiniMax, OpenAI Codex, Claude Code, OpenCode Go, and DeepSeek API
+const HELP = `ai-quota — coding-plan quota for MiniMax, OpenAI Codex, Claude Code, OpenCode Go, DeepSeek API, and Grok Build
 
 Usage: ai-quota [options]
 
@@ -40,7 +41,7 @@ By default, queries all providers in parallel and prints one combined report.
 Use --provider to limit to a single one. Use --watch to refresh periodically in place.
 
 Options:
-  -p, --provider <minimax|openai|claude|opencode|deepseek-api>  Single provider (default: all enabled)
+  -p, --provider <minimax|openai|claude|opencode|deepseek-api|grok>  Single provider (default: all enabled)
   -r, --region <cn|intl>           MiniMax endpoint (default: cn)
       --codex-auth <PATH>          Codex auth.json path (default: \$CODEX_HOME/auth.json or ~/.codex/auth.json)
       --claude-auth <PATH>         Claude credentials path (default: \$CLAUDE_CONFIG_DIR/.credentials.json or ~/.claude/.credentials.json)
@@ -86,6 +87,7 @@ function formatError(e: unknown): string {
   if (e instanceof ClaudeAuthError) return e.message;
   if (e instanceof OpencodeAuthError) return e.message;
   if (e instanceof DeepSeekUsageError) return e.status ? `${e.status}: ${e.message}` : e.message;
+  if (e instanceof GrokAuthError) return e.message;
   return e instanceof Error ? e.message : String(e);
 }
 
@@ -94,6 +96,7 @@ function isFatal(e: unknown): boolean {
   if (e instanceof CodexAuthError) return !e.retryable;
   if (e instanceof ClaudeAuthError) return !e.retryable;
   if (e instanceof OpencodeAuthError) return !e.retryable;
+  if (e instanceof GrokAuthError) return !e.retryable;
   if (e instanceof QuotaError) return e.status !== undefined; // 有 HTTP status = 致命
   return true;
 }
@@ -192,6 +195,11 @@ async function runDeepseek(values: Record<string, unknown>): Promise<ModelRemain
     configPath: ((values["deepseek-config"] ?? values.config) as string | undefined) ?? defaultStatePath(),
   });
   return result.modelRemains;
+}
+
+async function runGrok(_values: Record<string, unknown>): Promise<ModelRemain[]> {
+  const data = await queryGrok();
+  return data.model_remains;
 }
 
 type RunResult =
@@ -366,10 +374,12 @@ async function main(): Promise<void> {
     claude: runClaude,
     opencode: runOpencode,
     "deepseek-api": runDeepseek,
+    grok: runGrok,
   };
 
-  // plan 维度过滤：auth 配置决定启用哪些。
-  const planFilter = (name: string) => isEnabled(authCfg, name);
+  // plan 维度过滤：只隐藏可选 plan（如 minimax-video）；provider 启停由 providers 列表决定，不在此二次过滤。
+  const planFilter = (name: string) =>
+    (KNOWN_PLANS as readonly string[]).includes(name) ? isEnabled(authCfg, name) : true;
 
   // 传 --watch 或 --interval 都进入 watch 模式；未指定 interval 时走默认 60s
   if (values.watch || values.interval !== undefined) {
