@@ -1,24 +1,21 @@
 #!/usr/bin/env node
 import process from "node:process";
 import { parseArgs } from "node:util";
-import { persistBudgetCaps } from "./balance-ledger.js";
 import { computeDeepseekUsage, DeepSeekUsageError, defaultStatePath, type DeepseekComputeResult } from "./provider/deepseek.js";
+import { handleBudgetSubcommand } from "./budget-cmd.js";
 
 const HELP = `api-usage — deepseek-api balance, daily / weekly / monthly budget progress
 
 Usage: api-usage [options]
-       api-usage budget [-w <WEEKLY>] [-m <MONTHLY>] [--budget <DAILY>]
 
 First run each day/week/month records a baseline. Later runs accumulate balance drops into
 spent; top-ups do not reduce already recorded usage.
 
 Examples:
   api-usage                              # default daily 7 / weekly 35 / monthly 70 CNY
-  api-usage budget -w 10 -m 70           # persist weekly 10 / monthly 70 CNY
+  ai-quota budget -p deepseek-api -w 10 -m 70   # persist caps (preferred)
   api-usage --budget 10                  # override daily budget for one run
-  api-usage --weekly-budget 50           # override weekly budget for one run
-  api-usage --monthly-budget 70          # override monthly budget for one run
-  api-usage --watch -i 30s               # refresh every 30s (use --watch; not budget -w)
+  api-usage --watch -i 30s               # refresh every 30s
   api-usage --reset-today                # restart today's + week/month budget windows
 
 Options:
@@ -34,12 +31,7 @@ Options:
   -i, --interval <SECS>         Watch refresh interval (30/30s/1m, default 60)
   -h, --help                    Show this help
 
-budget subcommand (persist caps without API call):
-  -w <AMOUNT>                  Weekly budget cap (CNY)
-  -m <AMOUNT>                  Monthly budget cap (CNY)
-      --budget <AMOUNT>         Daily budget cap (optional)
-
-Requires: DEEPSEEK_API_KEY env (not required for \`api-usage budget\`).
+Requires: DEEPSEEK_API_KEY env.
 `;
 
 const useColor =
@@ -125,6 +117,10 @@ async function snapshot(values: Record<string, unknown>): Promise<DeepseekComput
   return result.detail;
 }
 
+function spentSuffix(used: number, currency: string): string {
+  return used > 0 ? dim(`  spent ${money(used, currency)}`) : "";
+}
+
 function render(s: DeepseekComputeResult["detail"]): string {
   const dailyColor = colorFor(s.todayUsedPercent);
   const weekColor = colorFor(s.weekUsedPercent);
@@ -138,23 +134,19 @@ function render(s: DeepseekComputeResult["detail"]): string {
     s.monthlyBudget.toFixed(2).length,
   );
   const budgetMoney = (n: number) => alignedMoney(n, s.currency, budgetWidth);
+  const grant =
+    s.grantedBalance > 0
+      ? ` (${money(s.grantedBalance, s.currency)} granted + ${money(s.toppedUpBalance, s.currency)} topped-up)`
+      : "";
   const lines = [
-    fmtTime(),
-    `  provider       ${cyan(s.provider)}`,
-    `  account        ${money(s.accountBalance, s.currency)} total  (${money(s.grantedBalance, s.currency)} granted + ${money(s.toppedUpBalance, s.currency)} topped-up)`,
-    `  monthly budget ${budgetMoney(s.monthLeft)} left / ${budgetMoney(s.monthlyBudget)}  ${monthColor(bar(s.monthUsedPercent))} ${monthColor(pct(s.monthUsedPercent))} used`,
-    `  weekly budget  ${budgetMoney(s.weekLeft)} left / ${budgetMoney(s.weeklyBudget)}  ${weekColor(bar(s.weekUsedPercent))} ${weekColor(pct(s.weekUsedPercent))} used`,
-    `  daily budget   ${budgetMoney(s.todayLeft)} left / ${budgetMoney(s.dailyBudget)}  ${dailyColor(bar(s.todayUsedPercent))} ${dailyColor(pct(s.todayUsedPercent))} used`,
-    `  today spent    ${money(s.todayUsed, s.currency)} since ${s.day}`,
-    `  day baseline   ${money(s.baselineBalance, s.currency)}  ${dim(s.baselineCreatedAt)}`,
-    `  week spent     ${money(s.weekUsed, s.currency)} since ${s.weekStart}`,
-    `  week baseline  ${money(s.weekBaselineBalance, s.currency)}  ${dim(s.weekBaselineCreatedAt)}`,
-    `  month spent    ${money(s.monthUsed, s.currency)} since ${s.monthStart}`,
-    `  month baseline ${money(s.monthBaselineBalance, s.currency)}  ${dim(s.monthBaselineCreatedAt)}`,
-    `  state          ${dim(s.statePath)}`,
-    `  available      ${s.isAvailable ? green("yes") : red("no")}`,
+    `${fmtTime()}  ${cyan(s.provider)}`,
+    `  balance  ${money(s.accountBalance, s.currency)}${grant}`,
+    `  daily    ${budgetMoney(s.todayLeft)} / ${budgetMoney(s.dailyBudget)}  ${dailyColor(bar(s.todayUsedPercent))} ${dailyColor(pct(s.todayUsedPercent))}${spentSuffix(s.todayUsed, s.currency)}`,
+    `  weekly   ${budgetMoney(s.weekLeft)} / ${budgetMoney(s.weeklyBudget)}  ${weekColor(bar(s.weekUsedPercent))} ${weekColor(pct(s.weekUsedPercent))}${spentSuffix(s.weekUsed, s.currency)}`,
+    `  monthly  ${budgetMoney(s.monthLeft)} / ${budgetMoney(s.monthlyBudget)}  ${monthColor(bar(s.monthUsedPercent))} ${monthColor(pct(s.monthUsedPercent))}${spentSuffix(s.monthUsed, s.currency)}`,
   ];
-  if (s.resetToday) lines.push(dim("  today's baseline reset to current account balance"));
+  if (!s.isAvailable) lines.push(`  ${red("account unavailable")}`);
+  if (s.resetToday) lines.push(dim("  baseline reset to current balance"));
   return lines.join("\n");
 }
 
@@ -192,72 +184,11 @@ async function runWatch(values: Record<string, unknown>, intervalMs: number): Pr
   await tick();
 }
 
-function parseBudgetSubcommand(argv: string[]): { weekly?: string; monthly?: string; daily?: string; config?: string; currency?: string; help?: boolean } {
-  const out: ReturnType<typeof parseBudgetSubcommand> = {};
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i]!;
-    if (a === "-h" || a === "--help") {
-      out.help = true;
-      continue;
-    }
-    if (a === "-w" || a === "--weekly-budget") {
-      const v = argv[++i];
-      if (!v) die(`${a} requires an amount`);
-      out.weekly = v;
-      continue;
-    }
-    if (a === "-m" || a === "--monthly-budget") {
-      const v = argv[++i];
-      if (!v) die(`${a} requires an amount`);
-      out.monthly = v;
-      continue;
-    }
-    if (a === "--budget") {
-      const v = argv[++i];
-      if (!v) die(`${a} requires an amount`);
-      out.daily = v;
-      continue;
-    }
-    if (a === "--config") {
-      const v = argv[++i];
-      if (!v) die(`${a} requires a path`);
-      out.config = v;
-      continue;
-    }
-    if (a === "--currency") {
-      const v = argv[++i];
-      if (!v) die(`${a} requires a code`);
-      out.currency = v;
-      continue;
-    }
-    die(`unknown budget argument: ${a}`);
-  }
-  if (!out.help && out.weekly === undefined && out.monthly === undefined && out.daily === undefined) {
-    die("budget: set at least one of -w <weekly>, -m <monthly>, or --budget <daily>");
-  }
-  return out;
-}
-
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   if (argv[0] === "budget") {
-    const caps = parseBudgetSubcommand(argv.slice(1));
-    if (caps.help) {
-      process.stdout.write(HELP);
-      return;
-    }
-    const path = caps.config ?? defaultStatePath();
-    const state = persistBudgetCaps(
-      path,
-      { weekly: caps.weekly, monthly: caps.monthly, daily: caps.daily, currency: caps.currency },
-      { daily: 7, weekly: 35, monthly: 70 },
-    );
-    const parts = [
-      caps.weekly !== undefined ? `weekly ${state.weeklyBudget}` : "",
-      caps.monthly !== undefined ? `monthly ${state.monthlyBudget}` : "",
-      caps.daily !== undefined ? `daily ${state.dailyBudget}` : "",
-    ].filter(Boolean);
-    process.stdout.write(`api-usage: saved ${parts.join(", ")} ${state.currency} → ${dim(path)}\n`);
+    process.stderr.write("api-usage: use `ai-quota budget -p deepseek-api …` instead\n");
+    handleBudgetSubcommand(["-p", "deepseek-api", ...argv.slice(1)]);
     return;
   }
 

@@ -149,7 +149,7 @@ export function recordBalanceUsage(
   };
 }
 
-/** Persist budget caps without querying account balance (used by `api-usage budget`). */
+/** Persist budget caps without querying account balance (`ai-quota budget`). */
 export function persistBudgetCaps(
   path: string,
   caps: { weekly?: string; monthly?: string; daily?: string; currency?: string },

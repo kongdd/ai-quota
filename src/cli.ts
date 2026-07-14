@@ -28,6 +28,7 @@ import {
   normalizeName,
   saveAuthConfig,
 } from "./auth.js";
+import { handleBudgetSubcommand } from "./budget-cmd.js";
 
 const VERSION = (() => {
   try {
@@ -70,6 +71,7 @@ Subcommands:
   ai-quota auth disable <NAME>              Disable a provider or plan
   ai-quota config long                      Show OpenCode Go second-column period (1w or 1m)
   ai-quota config long <1w|1m>              Set OpenCode Go week vs month quota display
+  ai-quota budget -p deepseek-api -w 10 -m 70   Persist DeepSeek weekly/monthly caps (no API call)
 `;
 
 const AUTH_HELP = `ai-quota auth — manage which providers and plans are queried
@@ -370,6 +372,10 @@ async function main(): Promise<void> {
   }
   if (argv[0] === "config") {
     handleConfigSubcommand(argv.slice(1));
+    return;
+  }
+  if (argv[0] === "budget") {
+    handleBudgetSubcommand(argv.slice(1));
     return;
   }
 

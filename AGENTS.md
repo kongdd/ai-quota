@@ -57,7 +57,7 @@ alias julia=/home/kong/.local/bin/julia
 - `ai-quota` and `api-usage` share DeepSeek accounting through `src/deepseek.ts`.
 - Generic balance-based daily/weekly ledger logic lives in `src/balance-ledger.ts`; provider files should only fetch/parse their own API balance and pass it into the ledger.
 - DeepSeek API only exposes current balance. Local state in `~/.config/ai-quota/api-usage.json` is the source of truth for daily/weekly/monthly budget accounting.
-- Persist caps: `api-usage budget -w <weekly> -m <monthly>` (optional `--budget` for daily); top-level `-w` remains `--watch`.
+- Persist caps: `ai-quota budget -p deepseek-api -w <weekly> -m <monthly>` (optional `--budget` for daily); `api-usage` top-level `-w` is `--watch`.
 - Critical DeepSeek state fields must be persisted:
   - account-level `last_balance`, `updated_at`
   - day/week `baseline_balance`, `created_at`, `spent`, `last_balance`, `updated_at`
