@@ -19,18 +19,21 @@
 | `--deepseek-daily-budget <AMOUNT>`  | DeepSeek daily budget override (default: 7)                                                         |
 | `--deepseek-weekly-budget <AMOUNT>` | DeepSeek weekly budget override (default: 35)                                                       |
 | `--deepseek-config <PATH>`          | DeepSeek budget state file (default `~/.config/ai-quota/api-usage.json`)                            |
+| `--zhipu-region <cn\|intl>`         | Zhipu endpoint (default`cn`)                                                                        |
+| `--zhipu-org <ID>`                  | Zhipu `bigmodel-organization` header (team plan)                                                    |
+| `--zhipu-project <ID>`              | Zhipu `bigmodel-project` header (team plan)                                                         |
 | `-w, --watch`                       | Refresh in place (implied by`-i`)                                                                   |
 | `-i, --interval <SECS>`             | Refresh interval (`30`/`30s`/`1m`, default `60`; implies `-w`)                                      |
 | `-h, --help`                        | Show help                                                                                           |
 | `-v, --version`                     | Show version                                                                                        |
 
-Env: `NO_COLOR=1`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `XDG_CONFIG_HOME`, `OPENCODE_SERVER`, `OPENCODE_GO_ENV`.
+Env: `NO_COLOR=1`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `XDG_CONFIG_HOME`, `OPENCODE_SERVER`, `OPENCODE_GO_ENV`, `ZHIPU_CN_API_KEY` / `ZHIPU_API_KEY` / `ZHIPU_ORG` / `ZHIPU_PROJECT`.
 
 ### 3 Auth subcommands
 
 Default behavior queries every **enabled** provider. The set is persisted at
 `$XDG_CONFIG_HOME/ai-quota/auth.json` (defaults to `~/.config/ai-quota/auth.json`).
-All six providers (`minimax`, `openai`, `claude`, `opencode`, `deepseek-api`, `grok`) are enabled out of the box. The optional `minimax-video` plan is disabled by default.
+All eight providers (`minimax`, `openai`, `claude`, `opencode`, `deepseek-api`, `grok`, `kimi`, `zhipu`) are enabled out of the box. The optional `minimax-video` plan is disabled by default.
 
 ```bash
 ai-quota auth list                          # show every provider/plan and its status
@@ -137,18 +140,57 @@ Lookup order:
 
 Without either credential, the Grok provider errors out. To disable: `ai-quota auth disable grok`. Plain `XAI_API_KEY` is **not** sufficient — the billing endpoint requires the subscription OAuth token.
 
-### 6 How it works
+### 6 Zhipu GLM Coding Plan authorization
+
+智谱 GLM 编码套餐 (Lite / Pro / Max) 配额来自智谱官方 `/monitor/usage/quota/limit` 端点，国内 `open.bigmodel.cn`，国际 `z.ai`。套餐 Key 与平台其他 API Key 不互通 — 必须在「个人编程套餐 / 套餐概览 / 新建 API Key」生成。
+
+**One-time setup**
+
+```bash
+# 国内（默认 cn）
+export ZHIPU_CN_API_KEY="..."          # 推荐；ZHIPU_API_KEY 也可作为回退
+ai-quota --provider zhipu
+
+# 国际
+export ZHIPU_API_KEY="..."
+ai-quota --provider zhipu --zhipu-region intl
+```
+
+**Team plan（团队版套餐）** — 除 `ZHIPU_API_KEY` 之外，团队空间还需要两个 header 才能命中配额：
+
+| Header                  | 来源                                                                  |
+| ----------------------- | --------------------------------------------------------------------- |
+| `bigmodel-organization` | 浏览器 DevTools → 访问 `bigmodel.cn/coding-plan/team/usage-stats` 时 network 请求里复制 |
+| `bigmodel-project`      | 同上                                                                  |
+
+```bash
+export ZHIPU_CN_API_KEY="..."
+export ZHIPU_ORG="..."               # optional，一键传给 --zhipu-org
+export ZHIPU_PROJECT="..."           # optional，一键传给 --zhipu-project
+ai-quota --provider zhipu            # 个人版无需上述 header
+```
+
+CLI 一键覆盖（不写入环境变量）：
+
+```bash
+ai-quota -p zhipu --zhipu-region cn --zhipu-org "your-org-id" --zhipu-project "your-project-id"
+```
+
+无 `ZHIPU_*_API_KEY` 时 provider 退出码为 2。若要禁用：`ai-quota auth disable zhipu`。无 team 套餐 org/project 时 personal 套餐也能查到。
+
+### 7 How it works
 
 Three read-only GETs, no side effects.
 
 
-| Provider     | Auth                                                                        | Endpoint                                                                                                                                       |
-| ------------ | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| MiniMax      | `MINIMAX_CN_API_KEY` (fallback `MINIMAX_API_KEY`)                           | `https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains` (intl: `minimax.io`)                                                        |
-| OpenAI Codex | OAuth JWT from`~/.codex/auth.json`                                          | `https://chatgpt.com/backend-api/wham/usage` — must use Codex-style headers; `api.openai.com` returns 401                                      |
-| Claude Code  | OAuth token from`~/.claude/.credentials.json`                               | `https://api.anthropic.com/api/oauth/usage` — requires `anthropic-beta: oauth-2025-04-20`                                                      |
-| OpenCode Go  | Cookie from `~/.config/ai-quota/opencode.env`                               | `https://opencode.ai/workspace/<id>/go` (HTML scrape) — see [OpenCode Go authorization](#opencode-go-authorization)                            |
-| DeepSeek API | `DEEPSEEK_API_KEY`                                                          | `https://api.deepseek.com/user/balance` — server only exposes current balance; daily/weekly via local spend ledger                             |
-| Grok Build   | OAuth `grok-cli` from`~/.pi/agent/auth.json` (fallback `~/.grok/auth.json`) | `https://cli-chat-proxy.grok.com/v1/billing` (+ `?format=credits` for weekly pool) — see [Grok Build authorization](#grok-build-authorization) |
+| Provider       | Auth                                                                        | Endpoint                                                                                                                                                  |
+| -------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MiniMax        | `MINIMAX_CN_API_KEY` (fallback `MINIMAX_API_KEY`)                           | `https://api.minimaxi.com/v1/token_plan/remains` (intl: `minimax.io`)                                                                                     |
+| OpenAI Codex   | OAuth JWT from`~/.codex/auth.json`                                          | `https://chatgpt.com/backend-api/wham/usage` — must use Codex-style headers; `api.openai.com` returns 401                                                 |
+| Claude Code    | OAuth token from`~/.claude/.credentials.json`                               | `https://api.anthropic.com/api/oauth/usage` — requires `anthropic-beta: oauth-2025-04-20`                                                                 |
+| OpenCode Go    | Cookie from `~/.config/ai-quota/opencode.env`                               | `https://opencode.ai/workspace/<id>/go` (HTML scrape) — see [OpenCode Go authorization](#opencode-go-authorization)                                       |
+| DeepSeek API   | `DEEPSEEK_API_KEY`                                                          | `https://api.deepseek.com/user/balance` — server only exposes current balance; daily/weekly via local spend ledger                                        |
+| Grok Build     | OAuth `grok-cli` from`~/.pi/agent/auth.json` (fallback `~/.grok/auth.json`) | `https://cli-chat-proxy.grok.com/v1/billing` (+ `?format=credits` for weekly pool) — see [Grok Build authorization](#grok-build-authorization)             |
+| Zhipu GLM Plan | `ZHIPU_CN_API_KEY` (fallback `ZHIPU_API_KEY`)                               | `https://open.bigmodel.cn/api/monitor/usage/quota/limit` (intl: `api.z.ai`) — team plan 需附加 `bigmodel-organization` + `bigmodel-project` header       |
 
 OpenAI retries 3× on transient `UND_ERR_CONNECT_TIMEOUT` (Cloudflare). Claude retries 3× on transient network errors. See [claude-code-quota](https://github.com/aweussom/claude-code-quota) for the Claude endpoint reverse-engineering notes; [minimax-coding-plan-quota-query](https://github.com/yunluoxin/minimax-coding-plan-quota-query) for MiniMax; [opencode-quota](https://github.com/slkiser/opencode-quota) for the OpenCode Go dashboard scraping pattern; [pi-xai](https://github.com/luxus/pi-xai) for the Grok Build billing surface (`xai-oauth.ts`).

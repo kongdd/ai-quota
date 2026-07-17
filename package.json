@@ -1,6 +1,6 @@
 {
   "name": "ai-quota",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Show AI coding-plan quota and API usage budget in the terminal",
   "type": "module",
   "bin": {
@@ -31,6 +31,13 @@
     "grok",
     "supergrok",
     "xai",
+    "kimi",
+    "moonshot",
+    "kimi-coding",
+    "zhipu",
+    "zhipuai",
+    "glm",
+    "bigmodel",
     "quota",
     "cli",
     "coding-plan"

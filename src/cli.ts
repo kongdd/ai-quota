@@ -17,6 +17,8 @@ import {
 } from "./opencode-config.js";
 import { computeDeepseekUsage, DeepSeekUsageError, defaultStatePath } from "./provider/deepseek.js";
 import { queryQuota as queryGrok, GrokAuthError } from "./provider/grok.js";
+import { queryQuota as queryKimi, KimiAuthError, resolveKimiApiKey } from "./provider/kimi.js";
+import { queryQuota as queryZhipu, ZhipuError, resolveZhipuApiKey, type Region as ZhipuRegion } from "./provider/zhipu.js";
 import { renderReport, dim, displayName } from "./format.js";
 import {
   KNOWN_PROVIDERS,
@@ -38,10 +40,10 @@ const VERSION = (() => {
   }
 })();
 
-type Provider = "minimax" | "openai" | "claude" | "opencode" | "deepseek-api" | "grok";
+type Provider = "minimax" | "openai" | "claude" | "opencode" | "deepseek-api" | "grok" | "kimi" | "zhipu";
 type Runner = (v: Record<string, unknown>) => Promise<ModelRemain[]>;
 
-const HELP = `ai-quota — coding-plan quota for MiniMax, OpenAI Codex, Claude Code, OpenCode Go, DeepSeek API, and Grok Build
+const HELP = `ai-quota — coding-plan quota for MiniMax, OpenAI Codex, Claude Code, OpenCode Go, DeepSeek API, Grok Build, Kimi Coding Plan, and Zhipu GLM Coding Plan
 
 Usage: ai-quota [options]
 
@@ -49,9 +51,12 @@ By default, queries all providers in parallel and prints one combined report.
 Use --provider to limit to a single one. Use --watch to refresh periodically in place.
 
 Options:
-  -p, --provider <minimax|openai|claude|opencode|deepseek-api|grok>  Single provider (default: all enabled)
+  -p, --provider <minimax|openai|claude|opencode|deepseek-api|grok|kimi|zhipu>  Single provider (default: all enabled)
       --long [1w|1m]               OpenCode Go: omit value → 5h+1w+1m columns; 1w|1m → second column (else config)
   -r, --region <cn|intl>           MiniMax endpoint (default: cn)
+      --zhipu-region <cn|intl>     Zhipu endpoint (default: cn)
+      --zhipu-org <ID>             Zhipu bigmodel-organization header (team plan)
+      --zhipu-project <ID>         Zhipu bigmodel-project header (team plan)
       --codex-auth <PATH>          Codex auth.json path (default: \$CODEX_HOME/auth.json or ~/.codex/auth.json)
       --claude-auth <PATH>         Claude credentials path (default: \$CLAUDE_CONFIG_DIR/.credentials.json or ~/.claude/.credentials.json)
       --deepseek-daily-budget, --budget <AMOUNT>  DeepSeek daily budget override
@@ -113,6 +118,8 @@ function formatError(e: unknown): string {
   if (e instanceof OpencodeAuthError) return e.message;
   if (e instanceof DeepSeekUsageError) return e.status ? `${e.status}: ${e.message}` : e.message;
   if (e instanceof GrokAuthError) return e.message;
+  if (e instanceof KimiAuthError) return e.message;
+  if (e instanceof ZhipuError) return e.status ? `${e.status}: ${e.message}` : e.message;
   return e instanceof Error ? e.message : String(e);
 }
 
@@ -122,7 +129,9 @@ function isFatal(e: unknown): boolean {
   if (e instanceof ClaudeAuthError) return !e.retryable;
   if (e instanceof OpencodeAuthError) return !e.retryable;
   if (e instanceof GrokAuthError) return !e.retryable;
+  if (e instanceof KimiAuthError) return !e.retryable;
   if (e instanceof QuotaError) return e.status !== undefined; // 有 HTTP status = 致命
+  if (e instanceof ZhipuError) return e.status !== undefined;  // 鉴权/HTTP 错误一律视为致命
   return true;
 }
 
@@ -260,6 +269,25 @@ async function runDeepseek(values: Record<string, unknown>): Promise<ModelRemain
 
 async function runGrok(_values: Record<string, unknown>): Promise<ModelRemain[]> {
   const data = await queryGrok();
+  return data.model_remains;
+}
+
+async function runKimi(_values: Record<string, unknown>): Promise<ModelRemain[]> {
+  const key = resolveKimiApiKey();
+  if (!key) throw new Error("API key required: set KIMI_API_KEY or MOONSHOT_API_KEY env");
+  const data = await queryKimi(key);
+  return data.model_remains;
+}
+
+async function runZhipu(values: Record<string, unknown>): Promise<ModelRemain[]> {
+  const key = resolveZhipuApiKey();
+  if (!key) throw new ZhipuError("API key required: set ZHIPU_CN_API_KEY or ZHIPU_API_KEY env", 401);
+  const rawRegion = (values["zhipu-region"] as string | undefined) ?? "cn";
+  if (rawRegion !== "cn" && rawRegion !== "intl") throw new ZhipuError(`--zhipu-region must be cn or intl`);
+  const data = await queryZhipu(key, rawRegion as ZhipuRegion, {
+    organization: values["zhipu-org"] as string | undefined,
+    project: values["zhipu-project"] as string | undefined,
+  });
   return data.model_remains;
 }
 
@@ -404,6 +432,9 @@ async function main(): Promise<void> {
         provider: { type: "string", short: "p" },
         long: { type: "string" },
         region: { type: "string", short: "r", default: "cn" },
+        "zhipu-region": { type: "string" },
+        "zhipu-org": { type: "string" },
+        "zhipu-project": { type: "string" },
         "codex-auth": { type: "string" },
         "claude-auth": { type: "string" },
         "deepseek-daily-budget": { type: "string" },
@@ -466,6 +497,8 @@ async function main(): Promise<void> {
     opencode: runOpencode,
     "deepseek-api": runDeepseek,
     grok: runGrok,
+    kimi: runKimi,
+    zhipu: runZhipu,
   };
 
   // plan 维度过滤：只隐藏可选 plan（如 minimax-video）；provider 启停由 providers 列表决定，不在此二次过滤。

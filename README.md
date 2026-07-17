@@ -15,6 +15,8 @@
 - [x] Opencode go         : `~/.config/ai-quota/opencode.env`
 - [x] Minimax coding plan : `MINIMAX_CN_API_KEY` or `MINIMAX_API_KEY` env
 - [x] DeepSeek API        : `DEEPSEEK_API_KEY`
+- [x] Kimi coding plan    : **待测试**，`KIMI_API_KEY` or `MOONSHOT_API_KEY` env
+- [x] Zhipu coding plan   : **待测试**，`ZHIPU_CN_API_KEY` or `ZHIPU_API_KEY` env (cn/intl regions)
 
 ## Usage
 

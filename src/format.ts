@@ -80,8 +80,10 @@ function modelRank(name: string): number {
   if (shown.startsWith("grok")) return 2;
   if (shown.startsWith("opencode")) return 3;
   if (shown.startsWith("minimax")) return 4;
+  if (shown.startsWith("kimi")) return 5;
+  if (shown.startsWith("zhipu")) return 6;
   if (shown.startsWith("deepseek")) return 99;
-  return 5;
+  return 7;
 }
 
 function money(amount: number, currency: string): string {
