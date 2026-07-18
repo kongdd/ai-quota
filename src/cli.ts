@@ -48,10 +48,11 @@ const HELP = `ai-quota — coding-plan quota for MiniMax, OpenAI Codex, Claude C
 Usage: ai-quota [options]
 
 By default, queries all providers in parallel and prints one combined report.
-Use --provider to limit to a single one. Use --watch to refresh periodically in place.
+Use --provider to limit to a subset (repeatable or comma-separated). Use --watch to refresh periodically in place.
 
 Options:
-  -p, --provider <minimax|openai|claude|opencode|deepseek-api|grok|kimi|zhipu>  Single provider (default: all enabled)
+  -p, --provider <NAME>[,<NAME>...]  One or more of: minimax, openai, claude, opencode, deepseek-api, grok, kimi, zhipu
+                                 Also: -p openai claude  or  -p openai -p claude  (default: all enabled)
       --long [1w|1m]               OpenCode Go: omit value → 5h+1w+1m columns; 1w|1m → second column (else config)
   -r, --region <cn|intl>           MiniMax endpoint (default: cn)
       --zhipu-region <cn|intl>     Zhipu endpoint (default: cn)
@@ -411,6 +412,16 @@ async function main(): Promise<void> {
   const parseArgv: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
+    // -p/--provider 支持空格分隔的多个 provider：贪心吞掉后续非 flag 参数，折叠成逗号分隔
+    if (a === "-p" || a === "--provider") {
+      const names: string[] = [];
+      while (i + 1 < argv.length && !argv[i + 1]!.startsWith("-")) {
+        names.push(argv[++i]!);
+      }
+      if (names.length > 0) parseArgv.push(a, names.join(","));
+      else parseArgv.push(a); // 无参数：留给 parseArgs 报 "requires argument"
+      continue;
+    }
     if (a === "--long") {
       const next = argv[i + 1];
       if (next === undefined || next.startsWith("-")) {
@@ -429,7 +440,7 @@ async function main(): Promise<void> {
     ({ values } = parseArgs({
       args: parseArgv,
       options: {
-        provider: { type: "string", short: "p" },
+        provider: { type: "string", short: "p", multiple: true },
         long: { type: "string" },
         region: { type: "string", short: "r", default: "cn" },
         "zhipu-region": { type: "string" },
@@ -474,14 +485,22 @@ async function main(): Promise<void> {
 
   const authCfg = loadAuthConfig();
 
-  // --provider 是一次性覆盖，跳过 auth 过滤；不传则只查已启用的 provider
-  const rawProvider = values.provider as string | undefined;
+  // --provider 是一次性覆盖，跳过 auth 过滤；支持重复传参和逗号分隔（-p a,b / -p a -p b）
+  const rawProviders = values.provider as string[] | undefined;
   let providers: Provider[];
-  if (rawProvider !== undefined) {
-    if (!(KNOWN_PROVIDERS as readonly string[]).includes(rawProvider)) {
-      die(`--provider must be ${KNOWN_PROVIDERS.join(", ")}, or omitted`);
+  if (rawProviders !== undefined) {
+    const picked = new Set<Provider>();
+    for (const raw of rawProviders) {
+      for (const piece of raw.split(",")) {
+        const name = normalizeName(piece);
+        if (!name || !(KNOWN_PROVIDERS as readonly string[]).includes(name)) {
+          die(`--provider must be ${KNOWN_PROVIDERS.join(", ")}, or omitted (got: ${piece.trim()})`);
+        }
+        picked.add(name as Provider);
+      }
     }
-    providers = [rawProvider as Provider];
+    if (picked.size === 0) die(`--provider must be ${KNOWN_PROVIDERS.join(", ")}, or omitted`);
+    providers = [...picked];
   } else {
     providers = (KNOWN_PROVIDERS as readonly Provider[]).filter((p) => isEnabled(authCfg, p));
     if (providers.length === 0) {
