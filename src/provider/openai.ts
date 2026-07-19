@@ -171,7 +171,7 @@ export async function queryQuota(
         throw new CodexAuthError(`HTTP ${resp.status} ${body.slice(0, 200)}`, resp.status === 429);
       }
       const data = (await resp.json()) as WhamResponse;
-      const modelName = data.plan_type ? `codex · ${data.plan_type}` : "codex";
+      const modelName = data.plan_type ? `codex · ${data.plan_type === "prolite" ? "pro" : data.plan_type}` : "codex";
       const modelRemain = whamToModelRemain(data, modelName);
       if (!modelRemain) {
         throw new CodexAuthError("rate_limit.primary_window missing in response", false);

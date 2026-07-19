@@ -96,7 +96,7 @@ function normalize(data: RawResponse, nowMs: number): ModelRemain {
   const weeklyPct = usedPercent(weekly) ?? intervalPct;
   const interval = toQuota(intervalPct, fiveHour?.resetTime, nowMs, nowMs + 5 * 3_600_000);
   const weeklyEnd = toQuota(weeklyPct, weekly?.resetTime, nowMs, interval.end_time);
-  return { model_name: "kimi-coding", interval, weekly: weeklyEnd };
+  return { model_name: "kimi", interval, weekly: weeklyEnd };
 }
 
 async function fetchUsage(url: string, apiKey: string, timeoutMs: number): Promise<RawResponse> {

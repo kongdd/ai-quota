@@ -178,7 +178,7 @@ export async function computeDeepseekUsage(opts: DeepseekComputeOptions): Promis
   saveLedgerState(statePath, state);
 
   const modelRemains: ModelRemain[] = [{
-    model_name: "deepseek-api",
+    model_name: "deepseek",
     interval: quota(usage.today.percent, windowEnd(now, "day"), nowMs),
     weekly: quota(usage.weekUsage.percent, windowEnd(now, "week"), nowMs),
     monthly: quota(usage.monthUsage.percent, windowEnd(now, "month"), nowMs),
