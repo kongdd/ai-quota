@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ModelRemain, QuotaResponse } from "./minimax.js";
@@ -116,6 +116,62 @@ export function loadGrokSubscriptionConfig(authPath = defaultAuthPath()): GrokSu
     if (fromOfficial) return fromOfficial;
   }
   return undefined;
+}
+
+/* ------------------------------------------------------------------ *
+ * Auto-refresh: 与 pi-grok-cli 同源的 OAuth refresh_token grant。
+ * 仅在 token 接近过期时调用，避免日常运行的网络往返；失败静默回落
+ * 到原始 401 路径（保持 "re-login via pi /login" 兜底文案）。
+ * ------------------------------------------------------------------ */
+
+const XAI_TOKEN_ENDPOINT = "https://auth.x.ai/oauth2/token";
+/** pi-grok-cli / pi-xai / cli-chat-proxy 共用的 xAI 公开 client_id。 */
+const XAI_OAUTH_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828";
+const REFRESH_SKEW_MS = 5 * 60 * 1000;
+const REFRESH_TIMEOUT_MS = 15_000;
+
+/** 若 OAuth 条目带 refresh_token 且即将过期，刷新后写回 auth.json 并返回新 token；
+ *  无刷新能力 / 仍新鲜 / 刷新失败 时返回原 token（让 401 路径兜底）。 */
+async function ensureFreshAccessToken(authPath: string, currentToken: string): Promise<string> {
+  const auth = readJson(authPath) as Record<string, unknown> | undefined;
+  if (!auth) return currentToken;
+
+  for (const key of PI_AUTH_KEYS) {
+    const e = auth[key] as Record<string, unknown> | undefined;
+    if (!e || e.access !== currentToken || typeof e.refresh !== "string" || !e.refresh) continue;
+    if (typeof e.expires === "number" && e.expires > Date.now() + REFRESH_SKEW_MS) return currentToken;
+
+    try {
+      const ac = new AbortController();
+      const t = setTimeout(() => ac.abort(), REFRESH_TIMEOUT_MS);
+      const resp = await fetch(XAI_TOKEN_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          client_id: XAI_OAUTH_CLIENT_ID,
+          refresh_token: e.refresh,
+        }),
+        signal: ac.signal,
+      }).finally(() => clearTimeout(t));
+      if (!resp.ok) return currentToken;
+      const p = (await resp.json()) as Record<string, unknown>;
+      const at = String(p.access_token ?? "");
+      if (!at) return currentToken;
+      const updated = {
+        ...e,
+        access: at,
+        refresh: typeof p.refresh_token === "string" ? p.refresh_token : e.refresh,
+        expires: Date.now() + (Number(p.expires_in ?? 21600) * 1000) - 120_000,
+      };
+      try { copyFileSync(authPath, `${authPath}.bak-${Date.now()}`); } catch {}
+      writeFileSync(authPath, JSON.stringify({ ...auth, [key]: updated }, null, 2) + "\n");
+      return at;
+    } catch {
+      return currentToken;
+    }
+  }
+  return currentToken;
 }
 
 /* ------------------------------------------------------------------ *
@@ -238,7 +294,8 @@ function toModelRemain(monthly: MonthlyUsage, weekly: WeeklyUsage | undefined): 
 export async function queryQuota(
   opts: { authPath?: string; timeoutMs?: number } = {},
 ): Promise<QuotaResponse> {
-  const cfg = loadGrokSubscriptionConfig(opts.authPath);
+  const authPath = opts.authPath ?? defaultAuthPath();
+  const cfg = loadGrokSubscriptionConfig(authPath);
   if (!cfg) {
     throw new GrokAuthError(
       "Grok Build credentials not found — need `grok-cli` OAuth in ~/.pi/agent/auth.json (pi `/login`), or `ai-quota auth disable grok` to skip",
@@ -246,8 +303,9 @@ export async function queryQuota(
     );
   }
   const timeoutMs = opts.timeoutMs ?? 15_000;
+  const accessToken = await ensureFreshAccessToken(authPath, cfg.accessToken);
 
-  const monthlyResp = await fetchBilling("", cfg.accessToken, timeoutMs, cfg.baseUrl);
+  const monthlyResp = await fetchBilling("", accessToken, timeoutMs, cfg.baseUrl);
   const config = monthlyResp.config;
   if (!config) throw new GrokAuthError("invalid billing payload: missing config", false);
   const monthlyLimit = unwrap(config.monthlyLimit);
@@ -261,7 +319,7 @@ export async function queryQuota(
   // 周使用池：best-effort，缺字段时不阻塞月度数据
   let weekly: WeeklyUsage | undefined;
   try {
-    const weeklyResp = await fetchBilling("?format=credits", cfg.accessToken, timeoutMs, cfg.baseUrl);
+    const weeklyResp = await fetchBilling("?format=credits", accessToken, timeoutMs, cfg.baseUrl);
     const c = weeklyResp.config;
     if (c?.currentPeriod?.type === "USAGE_PERIOD_TYPE_WEEKLY" && typeof c.creditUsagePercent === "number") {
       const end = typeof c.currentPeriod.end === "string" ? c.currentPeriod.end : billingPeriodEnd;
