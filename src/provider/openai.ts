@@ -54,6 +54,28 @@ interface WhamResponse {
   };
 }
 
+export interface CodexResetCredit {
+  status?: string;
+  grantedAt?: string;
+  expiresAt?: string;
+  title?: string;
+}
+
+export interface CodexResetCredits {
+  availableCount: number;
+  credits: CodexResetCredit[];
+}
+
+interface ResetCreditResponse {
+  available_count?: number;
+  credits?: Array<{
+    status?: string;
+    granted_at?: string;
+    expires_at?: string;
+    title?: string;
+  }>;
+}
+
 /** `~/.codex/auth.json` 路径 —— `$CODEX_HOME` 未设置时回退到 `~/.codex/`（与 codex-rs 默认行为一致） */
 function defaultAuthPath(): string {
   const home = process.env.CODEX_HOME ?? join(homedir(), ".codex");
@@ -106,6 +128,49 @@ function buildCodexHeaders(token: CodexToken): Record<string, string> {
   };
   if (token.accountId) headers["chatgpt-account-id"] = token.accountId;
   return headers;
+}
+
+/** 查询 Codex 可按需使用的限额重置卡。 */
+export async function queryResetCredits(
+  token: CodexToken,
+  opts: { baseUrl?: string; timeoutMs?: number } = {},
+): Promise<CodexResetCredits> {
+  const baseUrl = opts.baseUrl ?? "https://chatgpt.com";
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 30_000);
+
+  try {
+    const resp = await fetch(`${baseUrl}/backend-api/wham/rate-limit-reset-credits`, {
+      headers: buildCodexHeaders(token),
+      signal: ctrl.signal,
+    });
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => "");
+      throw new CodexAuthError(`HTTP ${resp.status} ${body.slice(0, 200)}`, resp.status === 429);
+    }
+
+    const data = (await resp.json()) as ResetCreditResponse;
+    const credits = (data.credits ?? []).map((c) => ({
+      status: c.status,
+      grantedAt: c.granted_at,
+      expiresAt: c.expires_at,
+      title: c.title,
+    }));
+    const count = Number(data.available_count);
+    return {
+      availableCount: Number.isFinite(count)
+        ? Math.max(0, Math.trunc(count))
+        : credits.filter((c) => (c.status ?? "available") === "available").length,
+      credits,
+    };
+  } catch (e) {
+    if (e instanceof CodexAuthError) throw e;
+    throw new CodexAuthError(e instanceof Error && e.name === "AbortError"
+      ? `timeout after ${opts.timeoutMs ?? 30_000}ms`
+      : `network: ${e instanceof Error ? e.message : e}`);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** 把 wham/usage 响应里的窗口数据归一化到内部 ModelRemain（5h / week） */

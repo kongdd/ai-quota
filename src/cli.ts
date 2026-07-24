@@ -5,7 +5,13 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { queryQuota as queryMinimax, QuotaError, type ModelRemain, type Region } from "./provider/minimax.js";
-import { queryQuota as queryOpenai, CodexAuthError, loadCodexToken } from "./provider/openai.js";
+import {
+  queryQuota as queryOpenai,
+  queryResetCredits,
+  CodexAuthError,
+  loadCodexToken,
+  type CodexResetCredits,
+} from "./provider/openai.js";
 import { queryQuota as queryClaude, ClaudeAuthError, loadClaudeToken } from "./provider/claude.js";
 import { queryQuota as queryOpencode, OpencodeAuthError } from "./provider/opencode.js";
 import {
@@ -78,6 +84,7 @@ Subcommands:
   ai-quota config long                      Show OpenCode Go second-column period (1w or 1m)
   ai-quota config long <1w|1m>              Set OpenCode Go week vs month quota display
   ai-quota budget -p deepseek-api -w 10 -m 70   Persist DeepSeek weekly/monthly caps (no API call)
+  ai-quota query reset-card -p codex         Show Codex rate-limit reset cards
 `;
 
 const AUTH_HELP = `ai-quota auth — manage which providers and plans are queried
@@ -104,6 +111,9 @@ Usage: ai-quota config long [1w|1m]
 
 Config file: ${aiQuotaConfigPath()}
 One-off: ai-quota -p opencode --long 1w | ai-quota -p opencode --long (three columns)
+`;
+
+const QUERY_HELP = `Usage: ai-quota query reset-card -p codex [--codex-auth <PATH>]
 `;
 
 function die(msg: string): never {
@@ -208,6 +218,53 @@ function handleConfigSubcommand(args: string[]): void {
     process.stdout.write(`ai-quota: OpenCode Go long window set to ${period}\n`);
   } catch (e) {
     die(e instanceof Error ? e.message : String(e));
+  }
+}
+
+function localTime(iso?: string): string {
+  if (!iso) return "-";
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString("sv-SE", { hour12: false });
+}
+
+function renderResetCredits(data: CodexResetCredits): string {
+  const cards = data.credits
+    .filter((c) => (c.status ?? "available") === "available")
+    .sort((a, b) => (a.expiresAt ?? "").localeCompare(b.expiresAt ?? ""));
+  const lines = [`codex reset cards: ${data.availableCount} available`];
+  if (cards.length) lines.push("GRANTED (LOCAL)      EXPIRES (LOCAL)      TITLE");
+  for (const card of cards) {
+    lines.push(`${localTime(card.grantedAt).padEnd(20)} ${localTime(card.expiresAt).padEnd(20)} ${card.title ?? "-"}`);
+  }
+  return lines.join("\n");
+}
+
+async function handleQuerySubcommand(args: string[]): Promise<void> {
+  if (args.includes("-h") || args.includes("--help")) {
+    process.stdout.write(QUERY_HELP);
+    return;
+  }
+  if (args[0] !== "reset-card") die(QUERY_HELP.trim());
+
+  let values: Record<string, unknown>;
+  try {
+    ({ values } = parseArgs({
+      args: args.slice(1),
+      options: {
+        provider: { type: "string", short: "p" },
+        "codex-auth": { type: "string" },
+      },
+    }) as { values: Record<string, unknown> });
+  } catch (e) {
+    die(`${e instanceof Error ? e.message : e}\n${QUERY_HELP}`);
+  }
+  if (values.provider !== "codex") die("query reset-card requires `-p codex`");
+
+  try {
+    const token = loadCodexToken(values["codex-auth"] as string | undefined);
+    process.stdout.write(`${renderResetCredits(await queryResetCredits(token))}\n`);
+  } catch (e) {
+    die(formatError(e));
   }
 }
 
@@ -405,6 +462,10 @@ async function main(): Promise<void> {
   }
   if (argv[0] === "budget") {
     handleBudgetSubcommand(argv.slice(1));
+    return;
+  }
+  if (argv[0] === "query") {
+    await handleQuerySubcommand(argv.slice(1));
     return;
   }
 

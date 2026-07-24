@@ -32,6 +32,7 @@ ai-quota auth enable opencode         # bring it back
 ai-quota                              # all enabled providers
 ai-quota -p minimax                   # one-off override; ignores auth config
 ai-quota -i 30s                       # refresh in place every 30s
+ai-quota query reset-card -p codex   # show Codex reset cards
 
 # 1week 10￥ / 1mon 70￥
 ai-quota budget -p deepseek-api -w 10 -m 70
