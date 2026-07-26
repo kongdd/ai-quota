@@ -8,19 +8,20 @@
   },
   "files": [
     "dist",
+    "docs/api.md",
     "README.md"
   ],
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
-    "start": "node --enable-source-maps dist/cli.js",
+    "start": "node --use-env-proxy --enable-source-maps dist/cli.js",
     "dev": "npm run build && npm start",
     "clean": "rm -rf dist",
     "prepare": "tsc",
     "prepublishOnly": "rm -rf dist && tsc"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22.21"
   },
   "keywords": [
     "minimax",
