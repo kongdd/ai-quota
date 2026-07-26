@@ -1,30 +1,23 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S node --use-env-proxy
 import process from "node:process";
 import { parseArgs } from "node:util";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { queryQuota as queryMinimax, QuotaError, type ModelRemain, type Region } from "./provider/minimax.js";
-import {
-  queryQuota as queryOpenai,
-  queryResetCredits,
-  CodexAuthError,
-  loadCodexToken,
-  type CodexResetCredits,
-} from "./provider/openai.js";
-import { queryQuota as queryClaude, ClaudeAuthError, loadClaudeToken } from "./provider/claude.js";
-import { queryQuota as queryOpencode, OpencodeAuthError } from "./provider/opencode.js";
+import { QuotaError } from "./provider/minimax.js";
+import { queryResetCredits, CodexAuthError, loadCodexToken, type CodexResetCredits } from "./provider/openai.js";
+import { ClaudeAuthError } from "./provider/claude.js";
+import { OpencodeAuthError } from "./provider/opencode.js";
 import {
   aiQuotaConfigPath,
   getOpencodeGoLongPeriod,
   parseOpencodeGoLongPeriod,
-  periodToLongWindow,
   setOpencodeGoLongPeriod,
 } from "./opencode-config.js";
-import { computeDeepseekUsage, DeepSeekUsageError, defaultStatePath } from "./provider/deepseek.js";
-import { queryQuota as queryGrok, GrokAuthError } from "./provider/grok.js";
-import { queryQuota as queryKimi, KimiAuthError, resolveKimiApiKey } from "./provider/kimi.js";
-import { queryQuota as queryZhipu, ZhipuError, resolveZhipuApiKey, type Region as ZhipuRegion } from "./provider/zhipu.js";
+import { DeepSeekUsageError } from "./provider/deepseek.js";
+import { GrokAuthError } from "./provider/grok.js";
+import { KimiAuthError } from "./provider/kimi.js";
+import { ZhipuError } from "./provider/zhipu.js";
 import { renderReport, dim, displayName } from "./format.js";
 import {
   KNOWN_PROVIDERS,
@@ -37,6 +30,8 @@ import {
   saveAuthConfig,
 } from "./auth.js";
 import { handleBudgetSubcommand } from "./budget-cmd.js";
+import { runQuotaQuery, type Provider, type QueryResult } from "./query.js";
+import { runServeCommand } from "./server.js";
 
 const VERSION = (() => {
   try {
@@ -45,9 +40,6 @@ const VERSION = (() => {
     return "0.0.0";
   }
 })();
-
-type Provider = "minimax" | "openai" | "claude" | "opencode" | "deepseek-api" | "grok" | "kimi" | "zhipu";
-type Runner = (v: Record<string, unknown>) => Promise<ModelRemain[]>;
 
 const HELP = `ai-quota — coding-plan quota for MiniMax, OpenAI Codex, Claude Code, OpenCode Go, DeepSeek API, Grok Build, Kimi Coding Plan, and Zhipu GLM Coding Plan
 
@@ -61,15 +53,8 @@ Options:
                                  Also: -p openai claude  or  -p openai -p claude  (default: all enabled)
       --long [1w|1m]               OpenCode Go: omit value → 5h+1w+1m columns; 1w|1m → second column (else config)
   -r, --region <cn|intl>           MiniMax endpoint (default: cn)
-      --zhipu-region <cn|intl>     Zhipu endpoint (default: cn)
-      --zhipu-org <ID>             Zhipu bigmodel-organization header (team plan)
-      --zhipu-project <ID>         Zhipu bigmodel-project header (team plan)
       --codex-auth <PATH>          Codex auth.json path (default: \$CODEX_HOME/auth.json or ~/.codex/auth.json)
       --claude-auth <PATH>         Claude credentials path (default: \$CLAUDE_CONFIG_DIR/.credentials.json or ~/.claude/.credentials.json)
-      --deepseek-daily-budget, --budget <AMOUNT>  DeepSeek daily budget override
-      --deepseek-weekly-budget, --weekly-budget <AMOUNT> DeepSeek weekly budget override
-      --deepseek-monthly-budget, --monthly-budget <AMOUNT> DeepSeek monthly budget override
-      --currency <CNY|USD>         DeepSeek balance currency (default: state/env/CNY)
       --deepseek-config, --config <PATH> DeepSeek budget state file (default: ~/.config/ai-quota/api-usage.json)
       --reset-today, --reset       Reset DeepSeek daily + weekly baselines
   -w, --watch                      Refresh in place until Ctrl+C (implied by --interval)
@@ -85,6 +70,7 @@ Subcommands:
   ai-quota config long <1w|1m>              Set OpenCode Go week vs month quota display
   ai-quota budget -p deepseek-api -w 10 -m 70   Persist DeepSeek weekly/monthly caps (no API call)
   ai-quota query reset-card -p codex         Show Codex rate-limit reset cards
+  ai-quota serve                             Start the local JSON API
 `;
 
 const AUTH_HELP = `ai-quota auth — manage which providers and plans are queried
@@ -268,115 +254,19 @@ async function handleQuerySubcommand(args: string[]): Promise<void> {
   }
 }
 
-/** Resolve the MiniMax API key. `MINIMAX_CN_API_KEY` wins over the legacy `MINIMAX_API_KEY`. */
-function minimaxApiKey(): string | undefined {
-  return process.env.MINIMAX_CN_API_KEY ?? process.env.MINIMAX_API_KEY;
-}
-
-async function runMinimax(values: Record<string, unknown>): Promise<ModelRemain[]> {
-  const region = values.region as Region;
-  if (region !== "cn" && region !== "intl") throw new Error(`--region must be cn or intl`);
-  const key = minimaxApiKey();
-  if (!key) throw new Error("API key required: set MINIMAX_CN_API_KEY or MINIMAX_API_KEY env");
-  const data = await queryMinimax(key, region);
-  return data.model_remains;
-}
-
-async function runOpenai(values: Record<string, unknown>): Promise<ModelRemain[]> {
-  const authPath = values["codex-auth"] as string | undefined;
-  const token = loadCodexToken(authPath);
-  const data = await queryOpenai(token);
-  return data.model_remains;
-}
-
-async function runClaude(values: Record<string, unknown>): Promise<ModelRemain[]> {
-  const authPath = values["claude-auth"] as string | undefined;
-  const token = loadClaudeToken(authPath);
-  const data = await queryClaude(token);
-  return data.model_remains;
-}
-
-async function runOpencode(values: Record<string, unknown>): Promise<ModelRemain[]> {
-  if (values["opencode-long-all"] === true) {
-    const data = await queryOpencode({ allWindows: true });
-    return data.model_remains;
-  }
-  const longRaw = values.long as string | undefined;
-  if (longRaw) {
-    const data = await queryOpencode({ longWindow: periodToLongWindow(parseOpencodeGoLongPeriod(longRaw)) });
-    return data.model_remains;
-  }
-  const data = await queryOpencode();
-  return data.model_remains;
-}
-
-async function runDeepseek(values: Record<string, unknown>): Promise<ModelRemain[]> {
-  const key = process.env.DEEPSEEK_API_KEY;
-  if (!key) throw new Error("API key required: set DEEPSEEK_API_KEY env");
-  const result = await computeDeepseekUsage({
-    apiKey: key,
-    currency: values.currency as string | undefined,
-    dailyBudget: (values["deepseek-daily-budget"] ?? values.budget) as string | undefined,
-    weeklyBudget: (values["deepseek-weekly-budget"] ?? values["weekly-budget"]) as string | undefined,
-    monthlyBudget: (values["deepseek-monthly-budget"] ?? values["monthly-budget"]) as string | undefined,
-    resetToday: values["reset-today"] === true || values.reset === true,
-    configPath: ((values["deepseek-config"] ?? values.config) as string | undefined) ?? defaultStatePath(),
-  });
-  return result.modelRemains;
-}
-
-async function runGrok(_values: Record<string, unknown>): Promise<ModelRemain[]> {
-  const data = await queryGrok();
-  return data.model_remains;
-}
-
-async function runKimi(_values: Record<string, unknown>): Promise<ModelRemain[]> {
-  const key = resolveKimiApiKey();
-  if (!key) throw new Error("API key required: set KIMI_API_KEY or MOONSHOT_API_KEY env");
-  const data = await queryKimi(key);
-  return data.model_remains;
-}
-
-async function runZhipu(values: Record<string, unknown>): Promise<ModelRemain[]> {
-  const key = resolveZhipuApiKey();
-  if (!key) throw new ZhipuError("API key required: set ZHIPU_CN_API_KEY or ZHIPU_API_KEY env", 401);
-  const rawRegion = (values["zhipu-region"] as string | undefined) ?? "cn";
-  if (rawRegion !== "cn" && rawRegion !== "intl") throw new ZhipuError(`--zhipu-region must be cn or intl`);
-  const data = await queryZhipu(key, rawRegion as ZhipuRegion, {
-    organization: values["zhipu-org"] as string | undefined,
-    project: values["zhipu-project"] as string | undefined,
-  });
-  return data.model_remains;
-}
-
-type RunResult =
-  | { name: Provider; ok: true; items: ModelRemain[] }
-  | { name: Provider; ok: false; error: unknown };
-
-async function runOnce(providers: Provider[], values: Record<string, unknown>, runners: Record<Provider, Runner>): Promise<RunResult[]> {
-  const settled = await Promise.allSettled(providers.map((p) => runners[p](values)));
-  return providers.map((name, i): RunResult => {
-    const r = settled[i]!;
-    return r.status === "fulfilled"
-      ? { name, ok: true, items: r.value }
-      : { name, ok: false, error: r.reason };
-  });
-}
-
-/** 把 runOnce 的结果渲染成单帧文本（含报告 + 错误行），并标记首个致命错误。
- *  watch / non-watch 共用渲染，调用方只决定写入位置与退出代码。 */
-function renderFrame(results: RunResult[], filter?: (displayName: string) => boolean): { body: string; fatal?: Extract<RunResult, { ok: false }> } {
-  const items = results.filter((r): r is Extract<RunResult, { ok: true }> => r.ok).flatMap((r) => r.items);
+/** 渲染单帧，并返回首个致命错误。 */
+function renderFrame(results: QueryResult[], filter?: (displayName: string) => boolean): { body: string; fatal?: Extract<QueryResult, { ok: false }> } {
+  const items = results.filter((r): r is Extract<QueryResult, { ok: true }> => r.ok).flatMap((r) => r.items);
   const errorLines = results
-    .filter((r): r is Extract<RunResult, { ok: false }> => !r.ok)
+    .filter((r): r is Extract<QueryResult, { ok: false }> => !r.ok)
     .map((r) => `ai-quota: ${r.name}: ${formatError(r.error)}`);
   const report = items.length === 0 ? dim("no quota data") : renderReport(items, Date.now(), "MiniMax Coding Plan", filter);
   const body = errorLines.length === 0 ? report : `${report}\n${errorLines.join("\n")}`;
-  const fatal = results.find((r): r is Extract<RunResult, { ok: false }> => !r.ok && isFatal(r.error));
+  const fatal = results.find((r): r is Extract<QueryResult, { ok: false }> => !r.ok && isFatal(r.error));
   return { body, fatal };
 }
 
-function printOnce(results: RunResult[], filter?: (displayName: string) => boolean): void {
+function printOnce(results: QueryResult[], filter?: (displayName: string) => boolean): void {
   // 单 provider：没东西可显示，必须 die
   if (results.length === 1) {
     const r = results[0]!;
@@ -393,7 +283,6 @@ function printOnce(results: RunResult[], filter?: (displayName: string) => boole
 async function runWatch(
   providers: Provider[],
   values: Record<string, unknown>,
-  runners: Record<Provider, Runner>,
   intervalMs: number,
   filter?: (displayName: string) => boolean,
 ): Promise<void> {
@@ -422,7 +311,7 @@ async function runWatch(
   };
 
   const tick = async () => {
-    const results = await runOnce(providers, values, runners);
+    const results = await runQuotaQuery(providers, values);
     const { body, fatal } = renderFrame(results, filter);
     if (fatal) {
       process.stderr.write(`ai-quota: ${fatal.name}: ${formatError(fatal.error)}\n`);
@@ -466,6 +355,14 @@ async function main(): Promise<void> {
   }
   if (argv[0] === "query") {
     await handleQuerySubcommand(argv.slice(1));
+    return;
+  }
+  if (argv[0] === "serve") {
+    try {
+      await runServeCommand(argv.slice(1));
+    } catch (e) {
+      die(e instanceof Error ? e.message : String(e));
+    }
     return;
   }
 
@@ -570,17 +467,6 @@ async function main(): Promise<void> {
     }
   }
 
-  const runners: Record<Provider, Runner> = {
-    minimax: runMinimax,
-    openai: runOpenai,
-    claude: runClaude,
-    opencode: runOpencode,
-    "deepseek-api": runDeepseek,
-    grok: runGrok,
-    kimi: runKimi,
-    zhipu: runZhipu,
-  };
-
   // plan 维度过滤：只隐藏可选 plan（如 minimax-video）；provider 启停由 providers 列表决定，不在此二次过滤。
   const planFilter = (name: string) =>
     (KNOWN_PLANS as readonly string[]).includes(name) ? isEnabled(authCfg, name) : true;
@@ -589,12 +475,12 @@ async function main(): Promise<void> {
   if (values.watch || values.interval !== undefined) {
     const raw = (values.interval as string | undefined) ?? "60";
     const intervalMs = parseInterval(raw);
-    await runWatch(providers, values, runners, intervalMs, planFilter);
+    await runWatch(providers, values, intervalMs, planFilter);
     return;
   }
   // 非 watch 模式：TTY 下启动清屏，避免连续两次跑时输出堆在旧结果后面
   if (process.stdout.isTTY) process.stdout.write("\x1b[2J\x1b[H");
-  printOnce(await runOnce(providers, values, runners), planFilter);
+  printOnce(await runQuotaQuery(providers, values), planFilter);
 }
 
 void main();

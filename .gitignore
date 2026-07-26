@@ -6,3 +6,5 @@ dist/
 .env.local
 .envrc
 *lock*
+
+*issue*

@@ -37,3 +37,15 @@ ai-quota query reset-card -p codex   # show Codex reset cards
 # 1week 10￥ / 1mon 70￥
 ai-quota budget -p deepseek-api -w 10 -m 70
 ```
+
+## JSON API
+
+```bash
+ai-quota serve                         # http://127.0.0.1:8787
+curl http://127.0.0.1:8787/api/v1/quotas
+
+export AI_QUOTA_API_TOKEN="$(openssl rand -hex 32)"
+ai-quota serve --host 0.0.0.0          # remote access requires bearer token
+```
+
+Endpoints and schema: [docs/api.md](docs/api.md).
