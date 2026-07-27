@@ -2,7 +2,14 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import process from "node:process";
 import { parseArgs } from "node:util";
-import { parseProviders, queryQuotaSnapshot, type Provider, type QuotaSnapshot } from "./query.js";
+import {
+  parseProviders,
+  queryCodexResetSnapshot,
+  queryQuotaSnapshot,
+  type CodexResetSnapshot,
+  type Provider,
+  type QuotaSnapshot,
+} from "./query.js";
 
 const API_VERSION = 1;
 
@@ -10,6 +17,7 @@ export interface ApiServerOptions {
   token?: string;
   corsOrigin?: string;
   query?: (providers?: Provider[]) => Promise<QuotaSnapshot>;
+  queryCodexReset?: () => Promise<CodexResetSnapshot>;
 }
 
 function json(response: ServerResponse, status: number, body: unknown): void {
@@ -51,6 +59,7 @@ function setCors(request: IncomingMessage, response: ServerResponse, origin?: st
 
 export function createApiServer(options: ApiServerOptions = {}): Server {
   const query = options.query ?? ((providers) => queryQuotaSnapshot({ providers }));
+  const queryCodexReset = options.queryCodexReset ?? queryCodexResetSnapshot;
   return createServer(async (request, response) => {
     setCors(request, response, options.corsOrigin);
 
@@ -79,9 +88,9 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
       return;
     }
 
-    if (url.pathname !== "/api/v1/quotas") {
-      return error(response, 404, "not_found", "endpoint not found");
-    }
+    const isQuotas = url.pathname === "/api/v1/quotas";
+    const isCodexReset = url.pathname === "/api/v1/codex/reset-cards";
+    if (!isQuotas && !isCodexReset) return error(response, 404, "not_found", "endpoint not found");
     if (request.method !== "GET") {
       response.setHeader("Allow", "GET");
       return error(response, 405, "method_not_allowed", "only GET is supported");
@@ -89,6 +98,14 @@ export function createApiServer(options: ApiServerOptions = {}): Server {
     if (!authorized(request, options.token)) {
       response.setHeader("WWW-Authenticate", "Bearer");
       return error(response, 401, "unauthorized", "valid bearer token required");
+    }
+
+    if (isCodexReset) {
+      try {
+        return json(response, 200, await queryCodexReset());
+      } catch (cause) {
+        return error(response, 500, "internal_error", cause instanceof Error ? cause.message : String(cause));
+      }
     }
 
     const raw = url.searchParams.get("providers");
@@ -133,7 +150,7 @@ export async function startApiServer(options: StartApiServerOptions = {}): Promi
   return server;
 }
 
-export const SERVE_HELP = `ai-quota serve — local JSON API\n\nUsage: ai-quota serve [options]\n\nOptions:\n      --host <HOST>          Listen address (default: 127.0.0.1)\n      --port <PORT>          Listen port (default: 8787)\n      --cors-origin <ORIGIN> Allowed browser origin (exact match)\n  -h, --help                 Show this help\n\nEnvironment:\n  AI_QUOTA_API_TOKEN         Bearer token; required outside localhost\n\nEndpoints:\n  GET /api/v1/health\n  GET /api/v1/quotas\n  GET /api/v1/quotas?providers=openai,claude\n`;
+export const SERVE_HELP = `ai-quota serve — local JSON API\n\nUsage: ai-quota serve [options]\n\nOptions:\n      --host <HOST>          Listen address (default: 127.0.0.1)\n      --port <PORT>          Listen port (default: 8787)\n      --cors-origin <ORIGIN> Allowed browser origin (exact match)\n  -h, --help                 Show this help\n\nEnvironment:\n  AI_QUOTA_API_TOKEN         Bearer token; required outside localhost\n\nEndpoints:\n  GET /api/v1/health\n  GET /api/v1/quotas\n  GET /api/v1/quotas?providers=openai,claude\n  GET /api/v1/codex/reset-cards\n`;
 
 export async function runServeCommand(args: string[]): Promise<void> {
   const { values } = parseArgs({

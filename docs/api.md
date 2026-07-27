@@ -25,6 +25,7 @@ ai-quota serve --cors-origin https://quota.example.com
 GET /api/v1/health
 GET /api/v1/quotas
 GET /api/v1/quotas?providers=openai,claude
+GET /api/v1/codex/reset-cards
 ```
 
 未指定 `providers` 时，查询 `ai-quota auth` 中启用的全部 provider。配置 token 后：
@@ -75,6 +76,26 @@ curl -H "Authorization: Bearer $AI_QUOTA_API_TOKEN" \
         "message": "credentials missing",
         "retryable": false
       }
+    }
+  ]
+}
+```
+
+Codex 重置卡：
+
+```json
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-26T03:00:00.000Z",
+  "provider": "openai",
+  "status": "ok",
+  "availableCount": 1,
+  "credits": [
+    {
+      "status": "available",
+      "title": "Rate limit reset",
+      "grantedAt": "2026-07-25T00:00:00.000Z",
+      "expiresAt": "2026-08-01T00:00:00.000Z"
     }
   ]
 }

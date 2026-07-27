@@ -174,19 +174,25 @@ export function renderReport(
 /** 窄屏竖排版：每 provider 一组多行（name + 5h + week + 月度可选 + balance 可选），避免外层 wrap。 */
 function renderReportCompact(sorted: ModelRemain[], now: number, extras?: Record<string, string>): string {
   const lines: string[] = [fmtTime(now)];
+  const labels = ["5h", "wk", "mo"];
   for (const m of sorted) {
     lines.push(displayName(m.model_name));
     const cols = colsForModel(m);
-    const labels = cols.length === 3 ? ["5h", "wk", "mo"] : ["5h", "wk"];
     for (let i = 0; i < cols.length; i++) {
-      const { remaining, endTime } = cols[i]!.get(m);
+      const col = cols[i];
+      if (!col) continue;
+      const { remaining, endTime } = col.get(m);
       const { bar, pct, dur } = cellBody(remaining, endTime, now, 8);
-      lines.push(`  ${labels[i]?.padEnd(3)} ${bar} ${pct}  ${dur}`);
+      lines.push(`  ${labels[i]!.padEnd(3)} ${bar} ${pct}  ${dur}`);
     }
     if (m.balance) lines.push(`  bal ${money(m.balance.amount, m.balance.currency)}`);
-    // extras key 按 model_name 前缀匹配（"codex" 匹配 "codex · pro" / "codex · max"）
-    const extra = extras ? Object.entries(extras).find(([k]) => m.model_name.startsWith(k))?.[1] : undefined;
+    const extra = findExtra(extras, m.model_name);
     if (extra) for (const line of extra.split("\n")) lines.push(`  ${line}`);
   }
   return lines.join("\n");
+}
+
+/** extras key 按 model_name 前缀匹配（"codex" 匹配 "codex · pro" / "codex · max"）；无匹配返回 undefined。 */
+function findExtra(extras: Record<string, string> | undefined, modelName: string): string | undefined {
+  return Object.entries(extras ?? {}).find(([k]) => modelName.startsWith(k))?.[1];
 }
