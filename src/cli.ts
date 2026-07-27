@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { QuotaError } from "./provider/minimax.js";
-import { queryResetCredits, CodexAuthError, loadCodexToken, type CodexResetCredits } from "./provider/openai.js";
+import { queryResetCredits, CodexAuthError, loadCodexToken, type CodexResetCredit, type CodexResetCredits } from "./provider/openai.js";
 import { ClaudeAuthError } from "./provider/claude.js";
 import { OpencodeAuthError } from "./provider/opencode.js";
 import {
@@ -30,7 +30,7 @@ import {
   saveAuthConfig,
 } from "./auth.js";
 import { handleBudgetSubcommand } from "./budget-cmd.js";
-import { runQuotaQuery, type Provider, type QueryResult } from "./query.js";
+import { runQuotaQuery, type Provider, type QueryResult, queryCodexResetSnapshot } from "./query.js";
 import { runServeCommand } from "./server.js";
 
 const VERSION = (() => {
@@ -59,6 +59,8 @@ Options:
       --reset-today, --reset       Reset DeepSeek daily + weekly baselines
   -w, --watch                      Refresh in place until Ctrl+C (implied by --interval)
   -i, --interval <SECS>            Watch refresh interval (accepts 30, 30s, 1m; default 60). Implies --watch.
+      --compact, --wide            Force vertical (one column per line) or horizontal layout; default: auto by stdout width
+      --reset-card                 Append codex reset cards under the codex line (implies --compact)
   -h, --help                       Show this help
   -v, --version                    Show version
 
@@ -214,15 +216,28 @@ function localTime(iso?: string): string {
 }
 
 function renderResetCredits(data: CodexResetCredits): string {
-  const cards = data.credits
-    .filter((c) => (c.status ?? "available") === "available")
-    .sort((a, b) => (a.expiresAt ?? "").localeCompare(b.expiresAt ?? ""));
+  const cards = availableResetCards(data.credits);
   const lines = [`codex reset cards: ${data.availableCount} available`];
   if (cards.length) lines.push("GRANTED (LOCAL)      EXPIRES (LOCAL)      TITLE");
   for (const card of cards) {
     lines.push(`${localTime(card.grantedAt).padEnd(20)} ${localTime(card.expiresAt).padEnd(20)} ${card.title ?? "-"}`);
   }
   return lines.join("\n");
+}
+
+/** 把 codex reset cards 格式化为多行字符串（每行一项），供 compact 布局嵌套在 provider 行下。 */
+function formatCodexResetCards(credits: CodexResetCredit[], availableCount: number): string {
+  const cards = availableResetCards(credits);
+  const head = `reset: ${availableCount} available`;
+  const rows = cards.map((c) => `${localTime(c.grantedAt)} → ${localTime(c.expiresAt)}  ${c.title ?? "-"}`);
+  return [head, ...rows].join("\n");
+}
+
+/** 过滤 + 按过期时间升序：给两种渲染（独立命令 / compact 嵌套）共享。 */
+function availableResetCards(credits: CodexResetCredit[]): CodexResetCredit[] {
+  return credits
+    .filter((c) => (c.status ?? "available") === "available")
+    .sort((a, b) => (a.expiresAt ?? "").localeCompare(b.expiresAt ?? ""));
 }
 
 async function handleQuerySubcommand(args: string[]): Promise<void> {
@@ -255,27 +270,27 @@ async function handleQuerySubcommand(args: string[]): Promise<void> {
 }
 
 /** 渲染单帧，并返回首个致命错误。 */
-function renderFrame(results: QueryResult[], filter?: (displayName: string) => boolean): { body: string; fatal?: Extract<QueryResult, { ok: false }> } {
+function renderFrame(results: QueryResult[], filter?: (displayName: string) => boolean, compact?: boolean, extras?: Record<string, string>): { body: string; fatal?: Extract<QueryResult, { ok: false }> } {
   const items = results.filter((r): r is Extract<QueryResult, { ok: true }> => r.ok).flatMap((r) => r.items);
   const errorLines = results
     .filter((r): r is Extract<QueryResult, { ok: false }> => !r.ok)
     .map((r) => `ai-quota: ${r.name}: ${formatError(r.error)}`);
-  const report = items.length === 0 ? dim("no quota data") : renderReport(items, Date.now(), "MiniMax Coding Plan", filter);
+  const report = items.length === 0 ? dim("no quota data") : renderReport(items, Date.now(), "MiniMax Coding Plan", filter, compact, extras);
   const body = errorLines.length === 0 ? report : `${report}\n${errorLines.join("\n")}`;
   const fatal = results.find((r): r is Extract<QueryResult, { ok: false }> => !r.ok && isFatal(r.error));
   return { body, fatal };
 }
 
-function printOnce(results: QueryResult[], filter?: (displayName: string) => boolean): void {
+function printOnce(results: QueryResult[], filter?: (displayName: string) => boolean, compact?: boolean, extras?: Record<string, string>): void {
   // 单 provider：没东西可显示，必须 die
   if (results.length === 1) {
     const r = results[0]!;
     if (!r.ok) die(formatError(r.error));
-    process.stdout.write(renderReport(r.items, Date.now(), "MiniMax Coding Plan", filter) + "\n");
+    process.stdout.write(renderReport(r.items, Date.now(), "MiniMax Coding Plan", filter, compact, extras) + "\n");
     return;
   }
   // 多 provider：统一渲染；全部失败 → exit 2，否则正常打印
-  const { body } = renderFrame(results, filter);
+  const { body } = renderFrame(results, filter, compact, extras);
   if (!results.some((r) => r.ok)) process.exit(2);
   process.stdout.write(body + "\n");
 }
@@ -285,6 +300,8 @@ async function runWatch(
   values: Record<string, unknown>,
   intervalMs: number,
   filter?: (displayName: string) => boolean,
+  compact?: boolean,
+  fetchExtras?: () => Promise<Record<string, string> | undefined>,
 ): Promise<void> {
   const isTty = !!process.stdout.isTTY;
   let lastLines = 0;
@@ -312,7 +329,8 @@ async function runWatch(
 
   const tick = async () => {
     const results = await runQuotaQuery(providers, values);
-    const { body, fatal } = renderFrame(results, filter);
+    const extras = await fetchExtras?.();
+    const { body, fatal } = renderFrame(results, filter, compact, extras);
     if (fatal) {
       process.stderr.write(`ai-quota: ${fatal.name}: ${formatError(fatal.error)}\n`);
       process.exit(2);
@@ -419,6 +437,9 @@ async function main(): Promise<void> {
         reset: { type: "boolean" },
         watch: { type: "boolean", short: "w" },
         interval: { type: "string", short: "i" },
+        compact: { type: "boolean" },
+        wide: { type: "boolean" },
+        "reset-card": { type: "boolean" },
         help: { type: "boolean", short: "h" },
         version: { type: "boolean", short: "v" },
       },
@@ -471,16 +492,40 @@ async function main(): Promise<void> {
   const planFilter = (name: string) =>
     (KNOWN_PLANS as readonly string[]).includes(name) ? isEnabled(authCfg, name) : true;
 
+  // 布局优先级：--wide 强制 false > --compact/--reset-card 强制 true > 默认按 columns 启发。
+  const wantResetCards = values["reset-card"] === true;
+  const compact = compactFlag(values)
+    ?? (wantResetCards || (process.stdout.columns ?? 80) < 60);
+  const fetchCodexExtras = wantResetCards && (providers as string[]).includes("openai")
+    ? async () => {
+        try {
+          const snap = await queryCodexResetSnapshot();
+          if (snap.status !== "ok" || snap.credits.length === 0) return undefined;
+          return { "codex": formatCodexResetCards(snap.credits, snap.availableCount) };
+        } catch {
+          return undefined;
+        }
+      }
+    : undefined;
+
   // 传 --watch 或 --interval 都进入 watch 模式；未指定 interval 时走默认 60s
   if (values.watch || values.interval !== undefined) {
     const raw = (values.interval as string | undefined) ?? "60";
     const intervalMs = parseInterval(raw);
-    await runWatch(providers, values, intervalMs, planFilter);
+    await runWatch(providers, values, intervalMs, planFilter, compact, fetchCodexExtras);
     return;
   }
   // 非 watch 模式：TTY 下启动清屏，避免连续两次跑时输出堆在旧结果后面
   if (process.stdout.isTTY) process.stdout.write("\x1b[2J\x1b[H");
-  printOnce(await runQuotaQuery(providers, values), planFilter);
+  const extras = await fetchCodexExtras?.();
+  printOnce(await runQuotaQuery(providers, values), planFilter, compact, extras);
+}
+
+/** --compact 强制竖排；--wide 强制横排；都不传返回 undefined（交给 stdout.columns 启发）。 */
+function compactFlag(values: Record<string, unknown>): boolean | undefined {
+  if (values.compact === true) return true;
+  if (values.wide === true) return false;
+  return undefined;
 }
 
 void main();

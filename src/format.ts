@@ -92,14 +92,21 @@ function money(amount: number, currency: string): string {
   return `${symbol}${amount.toFixed(2)}`;
 }
 
-function renderCell(col: Col, m: ModelRemain, now: number, durWidth: number): string {
+function renderCell(col: Col, m: ModelRemain, now: number, durWidth: number, barWidth = 10): string {
   const { remaining, endTime } = col.get(m);
+  const { bar, pct, dur } = cellBody(remaining, endTime, now, barWidth);
+  return `${bar} ${pct}  ${dur.padStart(durWidth)}`;
+}
+
+/** 单元格三件套（bar / pct / dur），给 wide 和 compact 两种布局共享。 */
+function cellBody(remaining: number, endTime: number, now: number, barWidth: number) {
   const used = 100 - remaining;
   const color = colorFor(remaining);
-  const b = color(bar(remaining));
-  const pct = `${used.toFixed(0).padStart(3)}%`;
-  const inMs = endTime - now;
-  return `${b} ${color(pct)}  ${cyan(fmtDuration(inMs).padStart(durWidth))}`;
+  return {
+    bar: color(bar(remaining, barWidth)),
+    pct: color(`${used.toFixed(0).padStart(3)}%`),
+    dur: cyan(fmtDuration(endTime - now)),
+  };
 }
 
 /** 去掉 ANSI 转义码以计算显示宽度 */
@@ -111,6 +118,8 @@ export function renderReport(
   now = Date.now(),
   _title = "MiniMax Coding Plan",
   filter?: (displayName: string) => boolean,
+  compact?: boolean,
+  extras?: Record<string, string>,
 ): string {
   if (items.length === 0) return dim("no quota data");
   const visible = filter ? items.filter((m) => filter(displayName(m.model_name))) : items;
@@ -119,6 +128,11 @@ export function renderReport(
     const byRank = modelRank(a.model_name) - modelRank(b.model_name);
     return byRank || displayName(a.model_name).localeCompare(displayName(b.model_name));
   });
+
+  // 窄屏（手机 / 短 TTY）：每列独立成行，避免被外层终端 wrap 拆开 reset 时间。
+  // 未传 compact 时按 stdout.columns 启发判断；显式 --compact/--wide 覆盖之。
+  const wantCompact = compact ?? (process.stdout.columns ?? 80) < 60;
+  if (wantCompact) return renderReportCompact(sorted, now, extras);
 
   const nCols = maxCols(sorted);
   const durWidths = Array.from({ length: nCols }, (_, i) =>
@@ -154,5 +168,25 @@ export function renderReport(
     lines.push(row);
   });
 
+  return lines.join("\n");
+}
+
+/** 窄屏竖排版：每 provider 一组多行（name + 5h + week + 月度可选 + balance 可选），避免外层 wrap。 */
+function renderReportCompact(sorted: ModelRemain[], now: number, extras?: Record<string, string>): string {
+  const lines: string[] = [fmtTime(now)];
+  for (const m of sorted) {
+    lines.push(displayName(m.model_name));
+    const cols = colsForModel(m);
+    const labels = cols.length === 3 ? ["5h", "wk", "mo"] : ["5h", "wk"];
+    for (let i = 0; i < cols.length; i++) {
+      const { remaining, endTime } = cols[i]!.get(m);
+      const { bar, pct, dur } = cellBody(remaining, endTime, now, 8);
+      lines.push(`  ${labels[i]?.padEnd(3)} ${bar} ${pct}  ${dur}`);
+    }
+    if (m.balance) lines.push(`  bal ${money(m.balance.amount, m.balance.currency)}`);
+    // extras key 按 model_name 前缀匹配（"codex" 匹配 "codex · pro" / "codex · max"）
+    const extra = extras ? Object.entries(extras).find(([k]) => m.model_name.startsWith(k))?.[1] : undefined;
+    if (extra) for (const line of extra.split("\n")) lines.push(`  ${line}`);
+  }
   return lines.join("\n");
 }
