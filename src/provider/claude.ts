@@ -1,6 +1,6 @@
-import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { readJsonFile } from "../auth.js";
 import type { ModelRemain, QuotaResponse } from "./minimax.js";
 
 export class ClaudeAuthError extends Error {
@@ -61,20 +61,12 @@ function defaultAuthPath(): string {
  * 从 Claude Code 持久化的 `.credentials.json` 读出 OAuth access token。
  */
 export function loadClaudeToken(authPath = defaultAuthPath()): ClaudeToken {
-  let raw: string;
-  try {
-    raw = readFileSync(authPath, "utf8");
-  } catch (e) {
-    throw new ClaudeAuthError(`read ${authPath} failed: ${e instanceof Error ? e.message : e}`, false);
-  }
-
   let parsed: CredentialsJson;
   try {
-    parsed = JSON.parse(raw) as CredentialsJson;
+    parsed = readJsonFile<CredentialsJson>(authPath);
   } catch (e) {
-    throw new ClaudeAuthError(`parse ${authPath}: ${e instanceof Error ? e.message : e}`, false);
+    throw new ClaudeAuthError(`${authPath}: ${e instanceof Error ? e.message : e}`, false);
   }
-
   const accessToken = parsed.claudeAiOauth?.accessToken;
   if (!accessToken) throw new ClaudeAuthError(`claudeAiOauth.accessToken missing in ${authPath}`, false);
   const subscriptionType = parsed.claudeAiOauth?.subscriptionType;

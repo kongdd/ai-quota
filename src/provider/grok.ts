@@ -1,6 +1,7 @@
-import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { piAgentAuthPath, tryReadJsonFile } from "../auth.js";
 import type { ModelRemain, QuotaResponse } from "./minimax.js";
 
 /** Grok Build CLI 代理的 billing 端点（cli-chat-proxy.grok.com）—— 与官方 `grok /usage` 同源。 */
@@ -28,23 +29,12 @@ export interface GrokSubscriptionConfig {
   baseUrl?: string;
 }
 
-/** pi agent 默认 auth.json：`$PI_CONFIG_DIR/auth.json` 或 `~/.pi/agent/auth.json`。 */
-export function defaultAuthPath(): string {
-  if (process.env.PI_CONFIG_DIR) return join(process.env.PI_CONFIG_DIR, "auth.json");
-  return join(homedir(), ".pi", "agent", "auth.json");
-}
-
 function officialGrokAuthPath(): string {
   return join(homedir(), ".grok", "auth.json");
 }
 
 function readJson(path: string): unknown | undefined {
-  if (!existsSync(path)) return undefined;
-  try {
-    return JSON.parse(readFileSync(path, "utf8"));
-  } catch {
-    return undefined;
-  }
+  return tryReadJsonFile(path);
 }
 
 function pickAccess(entry: Record<string, unknown>): string | undefined {
@@ -101,7 +91,7 @@ function loadFromOfficialGrokAuth(parsed: unknown): GrokSubscriptionConfig | und
  * 加载 Grok Build OAuth access token。
  * @param authPath 主 auth.json 路径（默认 `~/.pi/agent/auth.json`）；也可传官方 `~/.grok/auth.json`。
  */
-export function loadGrokSubscriptionConfig(authPath = defaultAuthPath()): GrokSubscriptionConfig | undefined {
+export function loadGrokSubscriptionConfig(authPath = piAgentAuthPath()): GrokSubscriptionConfig | undefined {
   // 1. 主路径：先按 pi agent 形态解析，再按官方 Grok CLI 形态解析（同一路径可能是两种文件之一）
   const primary = readJson(authPath);
   const fromPi = loadFromPiAuth(primary);
@@ -294,7 +284,7 @@ function toModelRemain(monthly: MonthlyUsage, weekly: WeeklyUsage | undefined): 
 export async function queryQuota(
   opts: { authPath?: string; timeoutMs?: number } = {},
 ): Promise<QuotaResponse> {
-  const authPath = opts.authPath ?? defaultAuthPath();
+  const authPath = opts.authPath ?? piAgentAuthPath();
   const cfg = loadGrokSubscriptionConfig(authPath);
   if (!cfg) {
     throw new GrokAuthError(

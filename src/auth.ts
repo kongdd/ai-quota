@@ -65,3 +65,40 @@ export function normalizeName(raw: string): KnownItem | undefined {
   const lower = raw.toLowerCase().trim();
   return KNOWN_ITEMS.find((k) => k.toLowerCase() === lower);
 }
+
+/** pi agent 默认 auth.json 路径：`$PI_CONFIG_DIR/auth.json` 或 `~/.pi/agent/auth.json`。 */
+export function piAgentAuthPath(): string {
+  if (process.env.PI_CONFIG_DIR) return join(process.env.PI_CONFIG_DIR, "auth.json");
+  return join(homedir(), ".pi", "agent", "auth.json");
+}
+
+/** 从 pi agent auth.json 读取 `entryName` 条目；文件不存在/JSON 错/条目不是对象时返回 `undefined`。 */
+export function readPiAuthEntry(entryName: string, authPath = piAgentAuthPath()): Record<string, unknown> | undefined {
+  const root = tryReadJsonFile(authPath);
+  if (!root || typeof root !== "object") return undefined;
+  const entry = (root as Record<string, unknown>)[entryName];
+  return entry && typeof entry === "object" ? (entry as Record<string, unknown>) : undefined;
+}
+
+/** 从 pi agent auth.json 读取 `entryName` 条目下的 api key；支持 `key / access / access_token / token` 字段。 */
+export function loadPiAuthKey(entryName: string, authPath = piAgentAuthPath()): string | undefined {
+  const e = readPiAuthEntry(entryName, authPath);
+  if (!e) return undefined;
+  const raw = e.key ?? e.access ?? e.access_token ?? e.token;
+  const key = typeof raw === "string" ? raw.trim() : "";
+  return key || undefined;
+}
+
+/** 读取并解析 auth.json；文件缺失或 JSON 失败抛错（调用方决定怎么映射到自己的 error 类型）。 */
+export function readJsonFile<T = unknown>(path: string): T {
+  return JSON.parse(readFileSync(path, "utf8")) as T;
+}
+
+/** 同 `readJsonFile`，但失败时返回 `undefined`（可选读取）。 */
+export function tryReadJsonFile(path: string): unknown {
+  try {
+    return readJsonFile(path);
+  } catch {
+    return undefined;
+  }
+}

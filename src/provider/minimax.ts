@@ -1,3 +1,5 @@
+import { loadPiAuthKey } from "../auth.js";
+
 export type Region = "cn" | "intl";
 
 /** 单个模型的 5h 窗口配额信息 */
@@ -60,6 +62,16 @@ const ENDPOINTS: Record<Region, string> = {
   cn: "https://api.minimaxi.com/v1/token_plan/remains",
   intl: "https://api.minimax.io/v1/token_plan/remains",
 };
+
+/** 解析 MiniMax API key：`~/.pi/agent/auth.json` (`minimax-cn`/`minimax`) > `MINIMAX_CN_API_KEY` > `MINIMAX_API_KEY`。 */
+export function resolveMinimaxApiKey(region: Region): string | undefined {
+  const names = region === "cn" ? ["minimax-cn", "minimax"] : ["minimax", "minimax-cn"];
+  for (const name of names) {
+    const k = loadPiAuthKey(name);
+    if (k) return k;
+  }
+  return (region === "cn" ? process.env.MINIMAX_CN_API_KEY : undefined) ?? process.env.MINIMAX_API_KEY;
+}
 
 /** 原始 API 响应字段（snake_case，外部接口） */
 interface RawModelRemain {

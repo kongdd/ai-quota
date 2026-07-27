@@ -1,6 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { loadPiAuthKey } from "../auth.js";
 import type { ModelRemain, QuotaResponse } from "./minimax.js";
 
 /**
@@ -125,36 +123,13 @@ async function fetchUsage(url: string, apiKey: string, timeoutMs: number): Promi
   }
 }
 
-/** pi agent 默认 auth.json 路径：`$PI_CONFIG_DIR/auth.json` 或 `~/.pi/agent/auth.json`。 */
-export function defaultAuthPath(): string {
-  if (process.env.PI_CONFIG_DIR) return join(process.env.PI_CONFIG_DIR, "auth.json");
-  return join(homedir(), ".pi", "agent", "auth.json");
-}
-
-/** 从 pi agent auth.json 的 `kimi-coding` 条目读取 api_key。 */
-function loadKimiKeyFromAuth(authPath = defaultAuthPath()): string | undefined {
-  if (!existsSync(authPath)) return undefined;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(authPath, "utf8"));
-  } catch {
-    return undefined;
-  }
-  if (!parsed || typeof parsed !== "object") return undefined;
-  const entry = (parsed as Record<string, unknown>)["kimi-coding"];
-  if (!entry || typeof entry !== "object") return undefined;
-  const e = entry as Record<string, unknown>;
-  const key = e.key ?? e.access ?? e.access_token ?? e.token;
-  return typeof key === "string" && key.trim() ? key.trim() : undefined;
-}
-
-/** 解析 Coding Plan API key：`KIMI_API_KEY` > `KIMI_CODING_API_KEY` > `MOONSHOT_API_KEY` > `~/.pi/agent/auth.json`。 */
+/** 解析 Coding Plan API key：`~/.pi/agent/auth.json` (`kimi-coding`) > `KIMI_API_KEY` > `KIMI_CODING_API_KEY` > `MOONSHOT_API_KEY`。 */
 export function resolveKimiApiKey(): string | undefined {
   return (
+    loadPiAuthKey("kimi-coding") ??
     process.env.KIMI_API_KEY ??
     process.env.KIMI_CODING_API_KEY ??
-    process.env.MOONSHOT_API_KEY ??
-    loadKimiKeyFromAuth()
+    process.env.MOONSHOT_API_KEY
   );
 }
 

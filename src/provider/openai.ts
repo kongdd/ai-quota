@@ -1,7 +1,7 @@
-import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { piAgentAuthPath, readJsonFile, readPiAuthEntry } from "../auth.js";
 import type { ModelRemain, QuotaResponse } from "./minimax.js";
 
 export class CodexAuthError extends Error {
@@ -82,23 +82,35 @@ function defaultAuthPath(): string {
   return join(home, "auth.json");
 }
 
+/** 从 pi agent auth.json 的 `openai-codex` 条目读 Codex OAuth token（access + accountId）。 */
+function loadCodexTokenFromPiAuth(authPath = piAgentAuthPath()): CodexToken | undefined {
+  const e = readPiAuthEntry("openai-codex", authPath);
+  if (!e) return undefined;
+  const raw = e.access ?? e.key ?? e.access_token ?? e.token;
+  const accessToken = typeof raw === "string" ? raw.trim() : "";
+  if (!accessToken) return undefined;
+  const token: CodexToken = { accessToken };
+  const idRaw = e.accountId ?? e.account_id;
+  const accountId = typeof idRaw === "string" ? idRaw.trim() : "";
+  if (accountId) token.accountId = accountId;
+  return token;
+}
+
 /**
  * 从 Codex CLI 持久化的 auth.json 读出 ChatGPT OAuth JWT。
- * 优先 ChatGPT 模式；缺失 tokens 时报错（API key 模式不返回 quota 窗口结构，跳过）。
+ * 优先 pi agent auth.json 的 `openai-codex` 条目，再回退到 `$CODEX_HOME/auth.json`（ChatGPT 模式）；
+ * 缺失 tokens 时报错（API key 模式不返回 quota 窗口结构，跳过）。
  */
 export function loadCodexToken(authPath = defaultAuthPath()): CodexToken {
-  let raw: string;
-  try {
-    raw = readFileSync(authPath, "utf8");
-  } catch (e) {
-    throw new CodexAuthError(`read ${authPath} failed: ${e instanceof Error ? e.message : e}`, false);
-  }
+  // 主路径：pi agent 共享的 OAuth 条目（无 refresh_token，刷新交由 pi 自己）
+  const fromPi = loadCodexTokenFromPiAuth();
+  if (fromPi) return fromPi;
 
   let parsed: AuthDotJson;
   try {
-    parsed = JSON.parse(raw) as AuthDotJson;
+    parsed = readJsonFile<AuthDotJson>(authPath);
   } catch (e) {
-    throw new CodexAuthError(`parse ${authPath}: ${e instanceof Error ? e.message : e}`, false);
+    throw new CodexAuthError(`${authPath}: ${e instanceof Error ? e.message : e}`, false);
   }
 
   if (parsed.auth_mode && parsed.auth_mode !== "chatgpt") {

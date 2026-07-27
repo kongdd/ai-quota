@@ -1,11 +1,16 @@
 import process from "node:process";
-import { KNOWN_PLANS, KNOWN_PROVIDERS, isEnabled, loadAuthConfig, type KnownProvider } from "./auth.js";
+import { KNOWN_PLANS, KNOWN_PROVIDERS, isEnabled, loadAuthConfig, loadPiAuthKey, type KnownProvider } from "./auth.js";
 import {
   parseOpencodeGoLongPeriod,
   resolveOpencodeGoLongWindowForQuery,
 } from "./opencode-config.js";
-import { queryQuota as queryMinimax, type ModelRemain, type Region } from "./provider/minimax.js";
-import { loadCodexToken, queryQuota as queryOpenai } from "./provider/openai.js";
+import { queryQuota as queryMinimax, resolveMinimaxApiKey, type ModelRemain, type Region } from "./provider/minimax.js";
+import {
+  loadCodexToken,
+  queryQuota as queryOpenai,
+  queryResetCredits,
+  type CodexResetCredit,
+} from "./provider/openai.js";
 import { loadClaudeToken, queryQuota as queryClaude } from "./provider/claude.js";
 import { queryQuota as queryOpencode } from "./provider/opencode.js";
 import { computeDeepseekUsage, defaultStatePath } from "./provider/deepseek.js";
@@ -56,6 +61,23 @@ export interface QuotaSnapshot {
   providers: ProviderSnapshot[];
 }
 
+export type CodexResetSnapshot =
+  | {
+      schemaVersion: 1;
+      generatedAt: string;
+      provider: "openai";
+      status: "ok";
+      availableCount: number;
+      credits: CodexResetCredit[];
+    }
+  | {
+      schemaVersion: 1;
+      generatedAt: string;
+      provider: "openai";
+      status: "error";
+      error: QuotaErrorSnapshot;
+    };
+
 function displayName(name: string): string {
   if (name === "general" || name === "MiniMax") return "minimax";
   if (name === "video" || name === "MiniMax-video") return "minimax-video";
@@ -65,8 +87,8 @@ function displayName(name: string): string {
 async function runMinimax(values: QueryValues): Promise<ModelRemain[]> {
   const region = (values.region ?? "cn") as Region;
   if (region !== "cn" && region !== "intl") throw new Error("--region must be cn or intl");
-  const key = process.env.MINIMAX_CN_API_KEY ?? process.env.MINIMAX_API_KEY;
-  if (!key) throw new Error("API key required: set MINIMAX_CN_API_KEY or MINIMAX_API_KEY env");
+  const key = resolveMinimaxApiKey(region);
+  if (!key) throw new Error("API key required: set MINIMAX_CN_API_KEY or MINIMAX_API_KEY env, or add to ~/.pi/agent/auth.json");
   return (await queryMinimax(key, region)).model_remains;
 }
 
@@ -89,8 +111,8 @@ async function runOpencode(values: QueryValues): Promise<ModelRemain[]> {
 }
 
 async function runDeepseek(values: QueryValues): Promise<ModelRemain[]> {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) throw new Error("API key required: set DEEPSEEK_API_KEY env");
+  const apiKey = loadPiAuthKey("deepseek") ?? process.env.DEEPSEEK_API_KEY;
+  if (!apiKey) throw new Error("API key required: set DEEPSEEK_API_KEY env, or add to ~/.pi/agent/auth.json");
   return (await computeDeepseekUsage({
     apiKey,
     currency: values.currency as string | undefined,
@@ -201,7 +223,7 @@ function modelSnapshot(model: ModelRemain, provider: Provider, now: number, valu
   return snapshot;
 }
 
-function errorSnapshot(error: unknown): QuotaErrorSnapshot {
+export function errorSnapshot(error: unknown): QuotaErrorSnapshot {
   const value = error as { message?: unknown; status?: unknown; retryable?: unknown };
   const message = error instanceof Error ? error.message : String(error);
   const httpStatus = typeof value?.status === "number" ? value.status : undefined;
@@ -254,4 +276,29 @@ export async function queryQuotaSnapshot(
 ): Promise<QuotaSnapshot> {
   const { providers = enabledProviders(), values = {}, now } = options;
   return quotaSnapshot(await runQuotaQuery(providers, values), now, values);
+}
+
+export async function queryCodexResetSnapshot(
+  options: { authPath?: string; now?: number } = {},
+): Promise<CodexResetSnapshot> {
+  const generatedAt = new Date(options.now ?? Date.now()).toISOString();
+  try {
+    const data = await queryResetCredits(loadCodexToken(options.authPath));
+    return {
+      schemaVersion: 1,
+      generatedAt,
+      provider: "openai",
+      status: "ok",
+      availableCount: data.availableCount,
+      credits: data.credits,
+    };
+  } catch (cause) {
+    return {
+      schemaVersion: 1,
+      generatedAt,
+      provider: "openai",
+      status: "error",
+      error: errorSnapshot(cause),
+    };
+  }
 }
