@@ -1,9 +1,10 @@
-#!/usr/bin/env -S node --use-env-proxy
+#!/usr/bin/env node
 import process from "node:process";
 import { parseArgs } from "node:util";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { EnvHttpProxyAgent, setGlobalDispatcher } from "undici";
 import { QuotaError } from "./provider/minimax.js";
 import { queryResetCredits, CodexAuthError, loadCodexToken, type CodexResetCredit, type CodexResetCredits } from "./provider/openai.js";
 import { ClaudeAuthError } from "./provider/claude.js";
@@ -32,6 +33,8 @@ import {
 import { handleBudgetSubcommand } from "./budget-cmd.js";
 import { runQuotaQuery, type Provider, type QueryResult, queryCodexResetSnapshot } from "./query.js";
 import { runServeCommand } from "./server.js";
+
+setGlobalDispatcher(new EnvHttpProxyAgent());
 
 const VERSION = (() => {
   try {
