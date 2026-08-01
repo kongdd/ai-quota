@@ -117,15 +117,18 @@ Without `OPENCODE_GO_WORKSPACE_ID` + `OPENCODE_GO_AUTH_COOKIE`, the OpenCode pro
 
 ### 5 Grok Build authorization
 
-Grok Build quota (SuperGrok / X Premium+ subscription) is read from the Grok Build CLI proxy at `cli-chat-proxy.grok.com`. Auth prefers the `grok-cli` OAuth entry in pi's `~/.pi/agent/auth.json` (written by pi `/login` / pi-grok-cli). Falls back to official `~/.grok/auth.json` if present. The same billing surface is what `grok /usage` and `pi-xai /xai-usage` query.
+Grok Build quota (SuperGrok / X Premium+ subscription) is read from the Grok Build CLI proxy at `cli-chat-proxy.grok.com`. Auth prefers the `xai` OAuth entry in pi's `~/.pi/agent/auth.json` (pi default provider; also written by pi `/login` / pi-xai). Falls back to `grok-cli` / `grok-build`, then official `~/.grok/auth.json`. The same billing surface is what `grok /usage` and `pi-xai /xai-usage` query.
 
 **One-time setup**
 
 ```bash
-# Preferred: log in via pi (writes ~/.pi/agent/auth.json → "grok-cli")
+# Preferred: log in via pi (writes ~/.pi/agent/auth.json → "xai")
 # Inside pi:
 #   /login
-#   choose Grok CLI / grok-build
+#   choose xAI / xai
+
+# Or: Grok CLI / pi-grok-cli (also accepted)
+#   /login → Grok CLI / grok-cli
 
 # Or: official Grok CLI (fallback path)
 #   grok login   # writes ~/.grok/auth.json
@@ -135,7 +138,7 @@ ai-quota --provider grok
 ```
 
 Lookup order:
-1. `$PI_CONFIG_DIR/auth.json` or `~/.pi/agent/auth.json` — keys `grok-cli` then `grok-build` (`type: oauth`, field `access`)
+1. `$PI_CONFIG_DIR/auth.json` or `~/.pi/agent/auth.json` — keys `xai`, then `grok-cli`, then `grok-build` (`type: oauth`, field `access`)
 2. `~/.grok/auth.json` — canonical `https://auth.x.ai::<client-id>` or legacy `https://accounts.x.ai/sign-in`
 
 Without either credential, the Grok provider errors out. To disable: `ai-quota auth disable grok`. Plain `XAI_API_KEY` is **not** sufficient — the billing endpoint requires the subscription OAuth token.
@@ -190,7 +193,7 @@ Three read-only GETs, no side effects.
 | Claude Code    | OAuth token from`~/.claude/.credentials.json`                               | `https://api.anthropic.com/api/oauth/usage` — requires `anthropic-beta: oauth-2025-04-20`                                                                 |
 | OpenCode Go    | Cookie from `~/.config/ai-quota/opencode.env`                               | `https://opencode.ai/workspace/<id>/go` (HTML scrape) — see [OpenCode Go authorization](#opencode-go-authorization)                                       |
 | DeepSeek API   | `DEEPSEEK_API_KEY`                                                          | `https://api.deepseek.com/user/balance` — server only exposes current balance; daily/weekly via local spend ledger                                        |
-| Grok Build     | OAuth `grok-cli` from`~/.pi/agent/auth.json` (fallback `~/.grok/auth.json`) | `https://cli-chat-proxy.grok.com/v1/billing` (+ `?format=credits` for weekly pool) — see [Grok Build authorization](#grok-build-authorization)             |
+| Grok Build     | OAuth `xai`/`grok-cli` from `~/.pi/agent/auth.json` (fallback `~/.grok/auth.json`) | `https://cli-chat-proxy.grok.com/v1/billing` (+ `?format=credits` for weekly pool) — see [Grok Build authorization](#grok-build-authorization)             |
 | Zhipu GLM Plan | `ZHIPU_CN_API_KEY` (fallback `ZHIPU_API_KEY`)                               | `https://open.bigmodel.cn/api/monitor/usage/quota/limit` (intl: `api.z.ai`) — team plan 需附加 `bigmodel-organization` + `bigmodel-project` header       |
 
 OpenAI retries 3× on transient `UND_ERR_CONNECT_TIMEOUT` (Cloudflare). Claude retries 3× on transient network errors. See [claude-code-quota](https://github.com/aweussom/claude-code-quota) for the Claude endpoint reverse-engineering notes; [minimax-coding-plan-quota-query](https://github.com/yunluoxin/minimax-coding-plan-quota-query) for MiniMax; [opencode-quota](https://github.com/slkiser/opencode-quota) for the OpenCode Go dashboard scraping pattern; [pi-xai](https://github.com/luxus/pi-xai) for the Grok Build billing surface (`xai-oauth.ts`).

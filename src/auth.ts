@@ -23,7 +23,7 @@ const PI_AUTH_PROVIDER_KEYS: Partial<Record<KnownProvider, readonly string[]>> =
   minimax: ["minimax-cn", "minimax"],
   openai: ["openai-codex"],
   "deepseek-api": ["deepseek"],
-  grok: ["grok-cli", "grok-build"],
+  grok: ["xai", "grok-cli", "grok-build"],
   kimi: ["kimi-coding"],
 };
 

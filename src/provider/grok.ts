@@ -6,8 +6,8 @@ import type { ModelRemain, QuotaResponse } from "./minimax.js";
 
 /** Grok Build CLI 代理的 billing 端点（cli-chat-proxy.grok.com）—— 与官方 `grok /usage` 同源。 */
 const DEFAULT_BASE_URL = "https://cli-chat-proxy.grok.com/v1";
-/** pi-agent / pi-grok-cli 在 auth.json 里用的 provider key（也兼容 pi-xai 的 grok-build）。 */
-const PI_AUTH_KEYS = ["grok-cli", "grok-build"] as const;
+/** pi-agent auth.json provider key：默认 xai，兼容 pi-grok-cli / pi-xai。 */
+const PI_AUTH_KEYS = ["xai", "grok-cli", "grok-build"] as const;
 
 export class GrokAuthError extends Error {
   constructor(message: string, public retryable = true) {
@@ -18,7 +18,7 @@ export class GrokAuthError extends Error {
 
 /**
  * 解析后的 Grok Build 订阅 OAuth token。
- * 优先从 pi agent 的 `~/.pi/agent/auth.json` 读 `grok-cli` / `grok-build` OAuth 条目；
+ * 优先从 pi agent 的 `~/.pi/agent/auth.json` 读 `xai` / `grok-cli` / `grok-build` OAuth 条目；
  * 若缺，回退到官方 Grok CLI 的 `~/.grok/auth.json`。
  * 本 provider 只读不写，也不刷新 token。
  */
@@ -47,7 +47,7 @@ function pickBaseUrl(entry: Record<string, unknown>): string | undefined {
   return typeof base === "string" && base.trim() ? base.trim().replace(/\/$/, "") : undefined;
 }
 
-/** 从 pi agent auth.json 读 grok-cli / grok-build OAuth 条目。 */
+/** 从 pi agent auth.json 读 xai / grok-cli / grok-build OAuth 条目。 */
 function loadFromPiAuth(parsed: unknown): GrokSubscriptionConfig | undefined {
   if (!parsed || typeof parsed !== "object") return undefined;
   const root = parsed as Record<string, unknown>;
@@ -237,7 +237,7 @@ async function fetchBilling(
     });
     if (resp.status === 401 || resp.status === 403) {
       throw new GrokAuthError(
-        "Grok Build billing requires a SuperGrok / X Premium OAuth token — re-login via pi (`/login` grok-cli) or refresh ~/.pi/agent/auth.json",
+        "Grok Build billing requires a SuperGrok / X Premium OAuth token — re-login via pi (`/login` xai) or refresh ~/.pi/agent/auth.json",
         false,
       );
     }
@@ -280,7 +280,7 @@ function toModelRemain(monthly: MonthlyUsage, weekly: WeeklyUsage | undefined): 
   };
 }
 
-/** 拉取 Grok Build 订阅额度：月度信用额度 + 周使用池。需 `~/.pi/agent/auth.json` 的 `grok-cli` OAuth 条目。 */
+/** 拉取 Grok Build 订阅额度：月度信用额度 + 周使用池。需 `~/.pi/agent/auth.json` 的 `xai`/`grok-cli` OAuth 条目。 */
 export async function queryQuota(
   opts: { authPath?: string; timeoutMs?: number } = {},
 ): Promise<QuotaResponse> {
@@ -288,7 +288,7 @@ export async function queryQuota(
   const cfg = loadGrokSubscriptionConfig(authPath);
   if (!cfg) {
     throw new GrokAuthError(
-      "Grok Build credentials not found — need `grok-cli` OAuth in ~/.pi/agent/auth.json (pi `/login`), or `ai-quota auth disable grok` to skip",
+      "Grok Build credentials not found — need `xai` OAuth in ~/.pi/agent/auth.json (pi `/login`), or `ai-quota auth disable grok` to skip",
       false,
     );
   }
