@@ -70,7 +70,7 @@ function maxCols(items: ModelRemain[]): number {
 export function displayName(name: string): string {
   if (name === "general" || name === "MiniMax") return "minimax";
   if (name === "video" || name === "MiniMax-video") return "minimax-video";
-  return name;
+  return name.replace(/\s*·\s*/g, "·");
 }
 
 function modelRank(name: string): number {
@@ -92,19 +92,26 @@ function money(amount: number, currency: string): string {
   return `${symbol}${amount.toFixed(2)}`;
 }
 
-function renderCell(col: Col, m: ModelRemain, now: number, durWidth: number, barWidth = 10): string {
+function renderCell(
+  col: Col,
+  m: ModelRemain,
+  now: number,
+  durWidth: number,
+  pctWidth: number,
+  barWidth = 10,
+): string {
   const { remaining, endTime } = col.get(m);
-  const { bar, pct, dur } = cellBody(remaining, endTime, now, barWidth);
-  return `${bar} ${pct}  ${dur.padStart(durWidth)}`;
+  const { bar, pct, dur } = cellBody(remaining, endTime, now, barWidth, pctWidth);
+  return `${bar} ${pct} ${padVisibleStart(dur, durWidth)}`;
 }
 
 /** 单元格三件套（bar / pct / dur），给 wide 和 compact 两种布局共享。 */
-function cellBody(remaining: number, endTime: number, now: number, barWidth: number) {
+function cellBody(remaining: number, endTime: number, now: number, barWidth: number, pctWidth = 3) {
   const used = 100 - remaining;
   const color = colorFor(remaining);
   return {
     bar: color(bar(remaining, barWidth)),
-    pct: color(`${used.toFixed(0).padStart(3)}%`),
+    pct: color(`${used.toFixed(0)}%`.padStart(pctWidth)),
     dur: cyan(fmtDuration(endTime - now)),
   };
 }
@@ -112,6 +119,8 @@ function cellBody(remaining: number, endTime: number, now: number, barWidth: num
 /** 去掉 ANSI 转义码以计算显示宽度 */
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
 const padVisible = (s: string, width: number): string => s + " ".repeat(Math.max(0, width - stripAnsi(s).length));
+const padVisibleStart = (s: string, width: number): string =>
+  " ".repeat(Math.max(0, width - stripAnsi(s).length)) + s;
 
 export function renderReport(
   items: ModelRemain[],
@@ -129,10 +138,17 @@ export function renderReport(
     return byRank || displayName(a.model_name).localeCompare(displayName(b.model_name));
   });
 
+  const pctWidth = Math.max(
+    3,
+    ...sorted.flatMap((m) =>
+      colsForModel(m).map((col) => `${(100 - col.get(m).remaining).toFixed(0)}%`.length),
+    ),
+  );
+
   // 窄屏（手机 / 短 TTY）：每列独立成行，避免被外层终端 wrap 拆开 reset 时间。
   // 未传 compact 时按 stdout.columns 启发判断；显式 --compact/--wide 覆盖之。
   const wantCompact = compact ?? (process.stdout.columns ?? 80) < 60;
-  if (wantCompact) return renderReportCompact(sorted, now, extras);
+  if (wantCompact) return renderReportCompact(sorted, now, pctWidth, extras);
 
   const nCols = maxCols(sorted);
   const durWidths = Array.from({ length: nCols }, (_, i) =>
@@ -144,15 +160,15 @@ export function renderReport(
       }),
     ),
   );
-
   const cells = sorted.map((m) => {
     const cols = colsForModel(m);
-    return cols.map((col, i) => renderCell(col, m, now, durWidths[i] ?? 0));
+    return cols.map((col, i) => renderCell(col, m, now, durWidths[i] ?? 0, pctWidth));
   });
   const colWidths = Array.from({ length: nCols }, (_, i) =>
     Math.max(...cells.map((row) => stripAnsi(row[i] ?? "").length)),
   );
   const lines: string[] = [fmtTime(now)];
+  const nameWidth = Math.max(...sorted.map((m) => displayName(m.model_name).length)) + 2;
 
   sorted.forEach((m, r) => {
     const rowCells = cells[r] ?? [];
@@ -162,7 +178,7 @@ export function renderReport(
       : rowCells.slice(1).map((cell, i) => ` ${padVisible(cell, colWidths[i + 1] ?? 0)}`).join("");
     const row =
       "  " +
-      displayName(m.model_name).padEnd(14) +
+      displayName(m.model_name).padEnd(nameWidth) +
       first +
       tail;
     lines.push(row);
@@ -172,7 +188,12 @@ export function renderReport(
 }
 
 /** 窄屏竖排版：每 provider 一组多行（name + 5h + week + 月度可选 + balance 可选），避免外层 wrap。 */
-function renderReportCompact(sorted: ModelRemain[], now: number, extras?: Record<string, string>): string {
+function renderReportCompact(
+  sorted: ModelRemain[],
+  now: number,
+  pctWidth: number,
+  extras?: Record<string, string>,
+): string {
   const lines: string[] = [fmtTime(now)];
   const labels = ["5h", "wk", "mo"];
   for (const m of sorted) {
@@ -182,7 +203,7 @@ function renderReportCompact(sorted: ModelRemain[], now: number, extras?: Record
       const col = cols[i];
       if (!col) continue;
       const { remaining, endTime } = col.get(m);
-      const { bar, pct, dur } = cellBody(remaining, endTime, now, 8);
+      const { bar, pct, dur } = cellBody(remaining, endTime, now, 8, pctWidth);
       lines.push(`  ${labels[i]!.padEnd(3)} ${bar} ${pct}  ${dur}`);
     }
     if (m.balance) lines.push(`  bal ${money(m.balance.amount, m.balance.currency)}`);
