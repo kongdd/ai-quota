@@ -50,6 +50,10 @@
     "coding-plan"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kongdd/ai-quota.git"
+  },
   "devDependencies": {
     "@types/node": "^25.9.3",
     "typescript": "^6.0.3"

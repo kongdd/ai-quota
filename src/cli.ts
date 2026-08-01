@@ -53,7 +53,7 @@ Use --provider to limit to a subset (repeatable or comma-separated). Use --watch
 
 Options:
   -p, --provider <NAME>[,<NAME>...]  One or more of: minimax, openai, claude, opencode, deepseek-api, grok, kimi, zhipu
-                                 Also: -p openai claude  or  -p openai -p claude  (default: all enabled)
+                                 Also: -p openai claude  or  -p openai -p claude  (default: enabled ones; first run auto-detects from ~/.pi/agent/auth.json)
       --long [1w|1m]               OpenCode Go: omit value → 5h+1w+1m columns; 1w|1m → second column (else config)
   -r, --region <cn|intl>           MiniMax endpoint (default: cn)
       --codex-auth <PATH>          Codex auth.json path (default: \$CODEX_HOME/auth.json or ~/.codex/auth.json)

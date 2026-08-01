@@ -16,18 +16,36 @@ export type KnownItem = (typeof KNOWN_ITEMS)[number];
 
 export type AuthConfig = Partial<Record<KnownItem, boolean>>;
 
-/** 项目缺省值 —— provider 默认启用；可选 plan 默认禁用。 */
-const DEFAULTS: Record<KnownItem, boolean> = {
-  minimax: true,
-  openai: true,
-  claude: true,
-  opencode: true,
-  "deepseek-api": true,
-  grok: true,
-  kimi: true,
-  zhipu: true,
-  "minimax-video": false,
+/** pi agent `~/.pi/agent/auth.json` 中 → ai-quota provider 的映射：
+ *  出现任一 key 即视为该 provider 已被 pi 授权，ai-quota 默认查询。
+ *  未列出的 provider（claude/opencode/zhipu 等凭据来源不在 pi auth.json 中）默认禁用，等用户 `auth enable` 显式开启。 */
+const PI_AUTH_PROVIDER_KEYS: Partial<Record<KnownProvider, readonly string[]>> = {
+  minimax: ["minimax-cn", "minimax"],
+  openai: ["openai-codex"],
+  "deepseek-api": ["deepseek"],
+  grok: ["grok-cli", "grok-build"],
+  kimi: ["kimi-coding"],
 };
+
+/** pi auth.json 中存在任一 `keys` 命名条目时返回 true。文件缺失/JSON 错 → false。 */
+function piAuthHasAny(keys: readonly string[]): boolean {
+  const root = tryReadJsonFile(piAgentAuthPath());
+  if (!root || typeof root !== "object") return false;
+  const obj = root as Record<string, unknown>;
+  return keys.some((k) => obj[k] && typeof obj[k] === "object");
+}
+
+/** 缺省启用规则：未在 cfg 显式声明时按 pi auth.json 实际授权情况判定。
+ *  - plan：默认禁用
+ *  - 有 PI_AUTH_PROVIDER_KEYS 映射的 provider：按 pi auth.json 是否存在任一 key 决定
+ *  - 其余 provider（凭据来源不在 pi auth.json）：默认禁用 */
+export function defaultEnabled(name: string): boolean {
+  const item = name as KnownItem;
+  if ((KNOWN_PLANS as readonly string[]).includes(item)) return false;
+  const piKeys = PI_AUTH_PROVIDER_KEYS[item as KnownProvider];
+  if (piKeys) return piAuthHasAny(piKeys);
+  return false;
+}
 
 /** 配置文件路径：遵循 XDG，$XDG_CONFIG_HOME 未设时回退 ~/.config */
 export function authConfigPath(): string {
@@ -53,11 +71,11 @@ export function saveAuthConfig(cfg: AuthConfig): void {
   writeFileSync(path, JSON.stringify(cfg, null, 2) + "\n");
 }
 
-/** 给定项目名，返回当前是否启用。文件里没写明时按 DEFAULTS 兜底。 */
+/** 给定项目名，返回当前是否启用。cfg 显式写过优先；未写时按 defaultEnabled（pi auth.json 实际授权情况）兜底。 */
 export function isEnabled(cfg: AuthConfig, name: string): boolean {
   const v = cfg[name as KnownItem];
   if (v === true || v === false) return v;
-  return DEFAULTS[name as KnownItem] ?? true;
+  return defaultEnabled(name);
 }
 
 /** 大小写不敏感地把用户传入的字符串归一到 KNOWN_ITEMS，未匹配返回 undefined。 */
