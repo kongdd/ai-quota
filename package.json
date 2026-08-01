@@ -1,6 +1,6 @@
 {
   "name": "ai-quota",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Show AI coding-plan quota and API usage budget in the terminal",
   "type": "module",
   "bin": {
