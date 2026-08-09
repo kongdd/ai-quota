@@ -14,7 +14,7 @@ import {
   getOpencodeGoLongPeriod,
   parseOpencodeGoLongPeriod,
   setOpencodeGoLongPeriod,
-} from "./opencode-config.js";
+} from "./config.js";
 import { DeepSeekUsageError } from "./provider/deepseek.js";
 import { GrokAuthError } from "./provider/grok.js";
 import { KimiAuthError } from "./provider/kimi.js";

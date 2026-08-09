@@ -5,7 +5,7 @@
   "type": "module",
   "bin": {
     "ai-quota": "./dist/cli.js",
-    "ee-quota": "./dist/ee-quota.js"
+    "ee-quota": "./dist/earthengine/ee-quota.js"
   },
   "files": [
     "dist",

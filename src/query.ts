@@ -3,7 +3,7 @@ import { KNOWN_PROVIDERS, isEnabled, loadAuthConfig, loadPiAuthKey, type KnownPr
 import {
   parseOpencodeGoLongPeriod,
   resolveOpencodeGoLongWindowForQuery,
-} from "./opencode-config.js";
+} from "./config.js";
 import { queryQuota as queryMinimax, resolveMinimaxApiKey, type ModelRemain, type Region } from "./provider/minimax.js";
 import {
   loadCodexToken,
