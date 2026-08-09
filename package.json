@@ -4,7 +4,8 @@
   "description": "Show AI coding-plan quota and API usage budget in the terminal",
   "type": "module",
   "bin": {
-    "ai-quota": "./dist/cli.js"
+    "ai-quota": "./dist/cli.js",
+    "ee-quota": "./dist/ee-quota.js"
   },
   "files": [
     "dist",
