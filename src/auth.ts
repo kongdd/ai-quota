@@ -6,13 +6,9 @@ import { homedir } from "node:os";
 export const KNOWN_PROVIDERS = ["minimax", "openai", "claude", "opencode", "deepseek-api", "grok", "kimi", "zhipu"] as const;
 export type KnownProvider = (typeof KNOWN_PROVIDERS)[number];
 
-/** provider 内部的 plan —— 决定默认渲染时哪些 plan 行被隐藏。 */
-export const KNOWN_PLANS = ["minimax-video"] as const;
-export type KnownPlan = (typeof KNOWN_PLANS)[number];
-
 /** 所有可被 `auth enable/disable` 操控的项目。 */
-export const KNOWN_ITEMS = [...KNOWN_PROVIDERS, ...KNOWN_PLANS] as const;
-export type KnownItem = (typeof KNOWN_ITEMS)[number];
+export const KNOWN_ITEMS = KNOWN_PROVIDERS;
+export type KnownItem = KnownProvider;
 
 export type AuthConfig = Partial<Record<KnownItem, boolean>>;
 
@@ -40,9 +36,7 @@ function piAuthHasAny(keys: readonly string[]): boolean {
  *  - 有 PI_AUTH_PROVIDER_KEYS 映射的 provider：按 pi auth.json 是否存在任一 key 决定
  *  - 其余 provider（凭据来源不在 pi auth.json）：默认禁用 */
 export function defaultEnabled(name: string): boolean {
-  const item = name as KnownItem;
-  if ((KNOWN_PLANS as readonly string[]).includes(item)) return false;
-  const piKeys = PI_AUTH_PROVIDER_KEYS[item as KnownProvider];
+  const piKeys = PI_AUTH_PROVIDER_KEYS[name as KnownProvider];
   if (piKeys) return piAuthHasAny(piKeys);
   return false;
 }

@@ -1,5 +1,5 @@
 import process from "node:process";
-import { KNOWN_PLANS, KNOWN_PROVIDERS, isEnabled, loadAuthConfig, loadPiAuthKey, type KnownProvider } from "./auth.js";
+import { KNOWN_PROVIDERS, isEnabled, loadAuthConfig, loadPiAuthKey, type KnownProvider } from "./auth.js";
 import {
   parseOpencodeGoLongPeriod,
   resolveOpencodeGoLongWindowForQuery,
@@ -80,7 +80,6 @@ export type CodexResetSnapshot =
 
 function displayName(name: string): string {
   if (name === "general" || name === "MiniMax") return "minimax";
-  if (name === "video" || name === "MiniMax-video") return "minimax-video";
   return name;
 }
 
@@ -254,12 +253,7 @@ export function quotaSnapshot(results: QueryResult[], now = Date.now(), values: 
   const config = loadAuthConfig();
   const providers = results.map((result): ProviderSnapshot => {
     if (!result.ok) return { provider: result.name, status: "error", error: errorSnapshot(result.error) };
-    const models = result.items
-      .filter((model) => {
-        const name = displayName(model.model_name);
-        return !(KNOWN_PLANS as readonly string[]).includes(name) || isEnabled(config, name);
-      })
-      .map((model) => modelSnapshot(model, result.name, now, values));
+    const models = result.items.map((model) => modelSnapshot(model, result.name, now, values));
     return { provider: result.name, status: "ok", models };
   });
   const succeeded = providers.filter((provider) => provider.status === "ok").length;

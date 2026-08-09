@@ -23,7 +23,6 @@ import { renderReport, dim, displayName } from "./format.js";
 import {
   KNOWN_PROVIDERS,
   KNOWN_ITEMS,
-  KNOWN_PLANS,
   authConfigPath,
   isEnabled,
   loadAuthConfig,
@@ -87,7 +86,7 @@ Commands:
   enable <NAME>              Enable the named provider or plan
   disable <NAME>             Disable the named provider or plan
 
-Known names: ${KNOWN_PROVIDERS.join(", ")}, ${KNOWN_PLANS.join(", ")}
+Known names: ${KNOWN_PROVIDERS.join(", ")}
 
 Config file: ${authConfigPath()} (overridable via \$XDG_CONFIG_HOME)
 `;
@@ -273,27 +272,27 @@ async function handleQuerySubcommand(args: string[]): Promise<void> {
 }
 
 /** 渲染单帧，并返回首个致命错误。 */
-function renderFrame(results: QueryResult[], filter?: (displayName: string) => boolean, compact?: boolean, extras?: Record<string, string>): { body: string; fatal?: Extract<QueryResult, { ok: false }> } {
+function renderFrame(results: QueryResult[], compact?: boolean, extras?: Record<string, string>): { body: string; fatal?: Extract<QueryResult, { ok: false }> } {
   const items = results.filter((r): r is Extract<QueryResult, { ok: true }> => r.ok).flatMap((r) => r.items);
   const errorLines = results
     .filter((r): r is Extract<QueryResult, { ok: false }> => !r.ok)
     .map((r) => `ai-quota: ${r.name}: ${formatError(r.error)}`);
-  const report = items.length === 0 ? dim("no quota data") : renderReport(items, Date.now(), "MiniMax Coding Plan", filter, compact, extras);
+  const report = items.length === 0 ? dim("no quota data") : renderReport(items, Date.now(), "MiniMax Coding Plan", compact, extras);
   const body = errorLines.length === 0 ? report : `${report}\n${errorLines.join("\n")}`;
   const fatal = results.find((r): r is Extract<QueryResult, { ok: false }> => !r.ok && isFatal(r.error));
   return { body, fatal };
 }
 
-function printOnce(results: QueryResult[], filter?: (displayName: string) => boolean, compact?: boolean, extras?: Record<string, string>): void {
+function printOnce(results: QueryResult[], compact?: boolean, extras?: Record<string, string>): void {
   // 单 provider：没东西可显示，必须 die
   if (results.length === 1) {
     const r = results[0]!;
     if (!r.ok) die(formatError(r.error));
-    process.stdout.write(renderReport(r.items, Date.now(), "MiniMax Coding Plan", filter, compact, extras) + "\n");
+    process.stdout.write(renderReport(r.items, Date.now(), "MiniMax Coding Plan", compact, extras) + "\n");
     return;
   }
   // 多 provider：统一渲染；全部失败 → exit 2，否则正常打印
-  const { body } = renderFrame(results, filter, compact, extras);
+  const { body } = renderFrame(results, compact, extras);
   if (!results.some((r) => r.ok)) process.exit(2);
   process.stdout.write(body + "\n");
 }
@@ -302,7 +301,6 @@ async function runWatch(
   providers: Provider[],
   values: Record<string, unknown>,
   intervalMs: number,
-  filter?: (displayName: string) => boolean,
   compact?: boolean,
   fetchExtras?: () => Promise<Record<string, string> | undefined>,
 ): Promise<void> {
@@ -333,7 +331,7 @@ async function runWatch(
   const tick = async () => {
     const results = await runQuotaQuery(providers, values);
     const extras = await fetchExtras?.();
-    const { body, fatal } = renderFrame(results, filter, compact, extras);
+    const { body, fatal } = renderFrame(results, compact, extras);
     if (fatal) {
       process.stderr.write(`ai-quota: ${fatal.name}: ${formatError(fatal.error)}\n`);
       process.exit(2);
@@ -491,10 +489,6 @@ async function main(): Promise<void> {
     }
   }
 
-  // plan 维度过滤：只隐藏可选 plan（如 minimax-video）；provider 启停由 providers 列表决定，不在此二次过滤。
-  const planFilter = (name: string) =>
-    (KNOWN_PLANS as readonly string[]).includes(name) ? isEnabled(authCfg, name) : true;
-
   // 布局优先级：--wide 强制 false > --compact/--reset-card 强制 true > 默认按 columns 启发。
   const wantResetCards = values["reset-card"] === true;
   const compact = compactFlag(values)
@@ -515,13 +509,13 @@ async function main(): Promise<void> {
   if (values.watch || values.interval !== undefined) {
     const raw = (values.interval as string | undefined) ?? "60";
     const intervalMs = parseInterval(raw);
-    await runWatch(providers, values, intervalMs, planFilter, compact, fetchCodexExtras);
+    await runWatch(providers, values, intervalMs, compact, fetchCodexExtras);
     return;
   }
   // 非 watch 模式：TTY 下启动清屏，避免连续两次跑时输出堆在旧结果后面
   if (process.stdout.isTTY) process.stdout.write("\x1b[2J\x1b[H");
   const extras = await fetchCodexExtras?.();
-  printOnce(await runQuotaQuery(providers, values), planFilter, compact, extras);
+  printOnce(await runQuotaQuery(providers, values), compact, extras);
 }
 
 /** --compact 强制竖排；--wide 强制横排；都不传返回 undefined（交给 stdout.columns 启发）。 */

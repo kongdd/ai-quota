@@ -69,7 +69,6 @@ function maxCols(items: ModelRemain[]): number {
 
 export function displayName(name: string): string {
   if (name === "general" || name === "MiniMax") return "minimax";
-  if (name === "video" || name === "MiniMax-video") return "minimax-video";
   return name.replace(/\s*·\s*/g, "·");
 }
 
@@ -126,14 +125,11 @@ export function renderReport(
   items: ModelRemain[],
   now = Date.now(),
   _title = "MiniMax Coding Plan",
-  filter?: (displayName: string) => boolean,
   compact?: boolean,
   extras?: Record<string, string>,
 ): string {
   if (items.length === 0) return dim("no quota data");
-  const visible = filter ? items.filter((m) => filter(displayName(m.model_name))) : items;
-  if (visible.length === 0) return dim("no quota data");
-  const sorted = [...visible].sort((a, b) => {
+  const sorted = [...items].sort((a, b) => {
     const byRank = modelRank(a.model_name) - modelRank(b.model_name);
     return byRank || displayName(a.model_name).localeCompare(displayName(b.model_name));
   });
