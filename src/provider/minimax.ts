@@ -153,6 +153,8 @@ export async function queryQuota(
   }
   return {
     base_resp: data.base_resp,
-    model_remains: data.model_remains.map(normalize),
+    model_remains: data.model_remains
+      .filter(({ model_name }) => model_name !== "video")
+      .map(normalize),
   };
 }
