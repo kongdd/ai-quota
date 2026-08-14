@@ -52,14 +52,29 @@ Endpoints and schema: [docs/api.md](docs/api.md).
 
 ## Earth Engine
 
+1. 完成 Earth Engine 授权并设置项目：
+
 ```bash
-# 先由 Earth Engine 完成授权
-ee-quota config set project gee-kongdd
-ee-quota config --unit h   # s 或 h
-ee-quota                         # 查询当前项目月额度
+earthengine authenticate
+earthengine set_project <PROJECT_ID>
 ```
 
-需要先完成 Earth Engine 授权，凭据默认位于 `~/.config/earthengine/credentials`。详见 [Earth Engine Authentication](https://developers.google.com/earth-engine/guides/auth)。
+2. 在网页右上角选择该项目，分别打开并点击**启用**：
+
+- [Cloud Quotas API](https://console.cloud.google.com/apis/library/cloudquotas.googleapis.com)
+- [Cloud Monitoring API](https://console.cloud.google.com/apis/library/monitoring.googleapis.com)
+
+若无法启用，请让项目所有者进入 [IAM](https://console.cloud.google.com/iam-admin/iam)，点击**授予访问权限**，添加你的 Google 账号，并授予 **Service Usage Admin** 角色。
+
+3. 查询月额度：
+
+```bash
+ee-quota config set project <PROJECT_ID>
+ee-quota config --unit h   # s 或 h
+ee-quota
+```
+
+Earth Engine 凭据默认位于 `~/.config/earthengine/credentials`，详见 [Earth Engine Authentication](https://developers.google.com/earth-engine/guides/auth)。
 
 ## Android App
 

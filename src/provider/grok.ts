@@ -260,9 +260,13 @@ async function fetchBilling(
 function toModelRemain(monthly: MonthlyUsage, weekly: WeeklyUsage | undefined): ModelRemain {
   const nowMs = Date.now();
   const monthlyEndMs = parseMs(monthly.billingPeriodEnd) ?? nowMs;
-  const monthlyUsedPercent = (monthly.used / monthly.monthlyLimit) * 100;
   const weeklyEndMs = parseMs(weekly?.billingPeriodEnd) ?? monthlyEndMs;
-  const weeklyUsedPercent = weekly?.creditUsagePercent ?? monthlyUsedPercent;
+  const monthlyUsedPercent = monthly.monthlyLimit > 0
+    ? (monthly.used / monthly.monthlyLimit) * 100
+    : undefined;
+  const weeklyUsedPercent = weekly?.creditUsagePercent ?? monthlyUsedPercent ?? 0;
+  const secondaryUsedPercent = monthlyUsedPercent ?? weeklyUsedPercent;
+  const secondaryEndMs = monthlyUsedPercent === undefined ? weeklyEndMs : monthlyEndMs;
   return {
     model_name: "grok",
     interval: {
@@ -272,10 +276,10 @@ function toModelRemain(monthly: MonthlyUsage, weekly: WeeklyUsage | undefined): 
       status: weeklyUsedPercent >= 100 ? 3 : 1,
     },
     weekly: {
-      remaining_percent: Math.max(0, 100 - monthlyUsedPercent),
-      remains_time: Math.max(0, monthlyEndMs - nowMs),
-      end_time: monthlyEndMs,
-      status: monthlyUsedPercent >= 100 ? 3 : 1,
+      remaining_percent: Math.max(0, 100 - secondaryUsedPercent),
+      remains_time: Math.max(0, secondaryEndMs - nowMs),
+      end_time: secondaryEndMs,
+      status: secondaryUsedPercent >= 100 ? 3 : 1,
     },
   };
 }
