@@ -19,7 +19,7 @@ export const EE_QUOTA_HELP = `Usage: ee-quota [options]
 Show Earth Engine's monthly EECU quota and usage.
 
 Options:
-  --minutes <N>        Usage lookback window (default: 60)
+  --minutes <N>        Usage lookback window (default: current month)
   --unit <s|h>         Display seconds or hours (default: configured s)
   --no-live             Skip live quota and usage lookup
   -w, --watch           Refresh in place until Ctrl+C
@@ -58,7 +58,7 @@ interface Report {
 }
 
 interface Options {
-  minutes: number;
+  minutes?: number;
   unit?: EeQuotaUnit;
   noLive: boolean;
   watch: boolean;
@@ -116,9 +116,11 @@ function pointValue(point: UsagePoint): number | undefined {
   return undefined;
 }
 
-async function fetchUsage(project: string, token: string, minutes: number): Promise<{ value?: number; endTime?: string }> {
+async function fetchUsage(project: string, token: string, minutes?: number): Promise<{ value?: number; endTime?: string }> {
   const end = new Date();
-  const start = new Date(end.getTime() - minutes * 60_000);
+  const start = minutes === undefined
+    ? new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1))
+    : new Date(end.getTime() - minutes * 60_000);
   const url = new URL(`${MONITORING_API}/projects/${encodeURIComponent(project)}/timeSeries`);
   url.searchParams.set("filter", `metric.type="serviceruntime.googleapis.com/quota/allocation/usage" resource.type="consumer_quota" resource.label.service="${SERVICE}"`);
   url.searchParams.set("interval.startTime", start.toISOString());
@@ -231,7 +233,7 @@ function formatInterval(ms: number): string {
 }
 
 function parseArgs(args: string[]): Options {
-  const out: Options = { minutes: 60, noLive: false, watch: false, intervalMs: 60_000, json: false };
+  const out: Options = { noLive: false, watch: false, intervalMs: 60_000, json: false };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
     if (arg === "--minutes") out.minutes = Number(args[++i]);
@@ -247,7 +249,9 @@ function parseArgs(args: string[]): Options {
     } else if (arg === "--json") out.json = true;
     else throw new Error(`unknown ee-quota option: ${arg}`);
   }
-  if (!Number.isInteger(out.minutes) || out.minutes < 1) throw new Error("--minutes must be a positive integer");
+  if (out.minutes !== undefined && (!Number.isInteger(out.minutes) || out.minutes < 1)) {
+    throw new Error("--minutes must be a positive integer");
+  }
   return out;
 }
 
