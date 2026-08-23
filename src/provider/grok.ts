@@ -1,7 +1,5 @@
-import { copyFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { piAgentAuthPath, piAuthCandidatePaths, tryReadJsonFile } from "../auth.js";
+import { piAgentAuthPath, piAuthCandidatePaths, tryReadJsonFile } from "../core-auth.js";
+import { copyFileSync, fetchQuota, homedir, join, writeFileSync } from "../platform.js";
 import type { ModelRemain, QuotaResponse } from "./minimax.js";
 
 /** Grok Build CLI 代理的 billing 端点（cli-chat-proxy.grok.com）—— 与官方 `grok /usage` 同源。 */
@@ -134,7 +132,7 @@ async function ensureFreshAccessToken(authPath: string, currentToken: string): P
     try {
       const ac = new AbortController();
       const t = setTimeout(() => ac.abort(), REFRESH_TIMEOUT_MS);
-      const resp = await fetch(XAI_TOKEN_ENDPOINT, {
+      const resp = await fetchQuota(XAI_TOKEN_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
@@ -230,7 +228,7 @@ async function fetchBilling(
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const resp = await fetch(billingUrl(baseUrl, path), {
+    const resp = await fetchQuota(billingUrl(baseUrl, path), {
       method: "GET",
       headers: billingHeaders(token),
       signal: ctrl.signal,

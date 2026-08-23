@@ -1,4 +1,5 @@
-import { loadPiAuthKey } from "../auth.js";
+import { loadPiAuthKey } from "../core-auth.js";
+import { env, fetchQuota } from "../platform.js";
 import type { ModelRemain, QuotaResponse } from "./minimax.js";
 
 /**
@@ -101,7 +102,7 @@ async function fetchUsage(url: string, apiKey: string, timeoutMs: number): Promi
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const resp = await fetch(url, {
+    const resp = await fetchQuota(url, {
       headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
       signal: ctrl.signal,
     });
@@ -127,9 +128,10 @@ async function fetchUsage(url: string, apiKey: string, timeoutMs: number): Promi
 export function resolveKimiApiKey(): string | undefined {
   return (
     loadPiAuthKey("kimi-coding") ??
-    process.env.KIMI_API_KEY ??
-    process.env.KIMI_CODING_API_KEY ??
-    process.env.MOONSHOT_API_KEY
+    loadPiAuthKey("kimi") ??
+    env.KIMI_API_KEY ??
+    env.KIMI_CODING_API_KEY ??
+    env.MOONSHOT_API_KEY
   );
 }
 

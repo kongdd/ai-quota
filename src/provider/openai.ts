@@ -1,7 +1,5 @@
-import { homedir } from "node:os";
-import { randomUUID } from "node:crypto";
-import { join } from "node:path";
-import { piAgentAuthPath, readJsonFile, readPiAuthEntry } from "../auth.js";
+import { piAgentAuthPath, readJsonFile, readPiAuthEntry } from "../core-auth.js";
+import { env, fetchQuota, homedir, join, randomUUID } from "../platform.js";
 import type { ModelRemain, QuotaResponse } from "./minimax.js";
 
 export class CodexAuthError extends Error {
@@ -78,13 +76,13 @@ interface ResetCreditResponse {
 
 /** `~/.codex/auth.json` 路径 —— `$CODEX_HOME` 未设置时回退到 `~/.codex/`（与 codex-rs 默认行为一致） */
 function defaultAuthPath(): string {
-  const home = process.env.CODEX_HOME ?? join(homedir(), ".codex");
+  const home = env.CODEX_HOME ?? join(homedir(), ".codex");
   return join(home, "auth.json");
 }
 
 /** 从 pi agent auth.json 的 `openai-codex` 条目读 Codex OAuth token（access + accountId）。 */
 function loadCodexTokenFromPiAuth(authPath = piAgentAuthPath()): CodexToken | undefined {
-  const e = readPiAuthEntry("openai-codex", authPath);
+  const e = readPiAuthEntry("openai-codex", authPath) ?? readPiAuthEntry("openai", authPath);
   if (!e) return undefined;
   const raw = e.access ?? e.key ?? e.access_token ?? e.token;
   const accessToken = typeof raw === "string" ? raw.trim() : "";
@@ -152,7 +150,7 @@ export async function queryResetCredits(
   const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 30_000);
 
   try {
-    const resp = await fetch(`${baseUrl}/backend-api/wham/rate-limit-reset-credits`, {
+    const resp = await fetchQuota(`${baseUrl}/backend-api/wham/rate-limit-reset-credits`, {
       headers: buildCodexHeaders(token),
       signal: ctrl.signal,
     });
@@ -236,7 +234,7 @@ export async function queryQuota(
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-      const resp = await fetch(url, {
+      const resp = await fetchQuota(url, {
         method: "GET",
         headers,
         signal: ctrl.signal,

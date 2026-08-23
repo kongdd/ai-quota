@@ -6,8 +6,9 @@ import {
   resolveBudget,
   saveLedgerState,
   windowEnd,
-} from "../balance-ledger.js";
+} from "../core-balance-ledger.js";
 import type { ModelRemain } from "./minimax.js";
+import { env, fetchQuota } from "../platform.js";
 
 const API = "https://api.deepseek.com";
 const DEFAULT_DAILY = 7;
@@ -89,7 +90,7 @@ async function queryBalance(apiKey: string, timeoutMs = 15_000): Promise<Balance
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const resp = await fetch(`${API}/user/balance`, {
+    const resp = await fetchQuota(`${API}/user/balance`, {
       headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
       signal: ctrl.signal,
     });
@@ -151,7 +152,7 @@ export async function computeDeepseekUsage(opts: DeepseekComputeOptions): Promis
     defaultWeeklyBudget: DEFAULT_WEEKLY,
     defaultMonthlyBudget: DEFAULT_MONTHLY,
   });
-  const currency = (opts.currency ?? process.env.DEEPSEEK_CURRENCY ?? savedState?.currency ?? "CNY").toUpperCase();
+  const currency = (opts.currency ?? env.DEEPSEEK_CURRENCY ?? savedState?.currency ?? "CNY").toUpperCase();
   const state = savedState?.currency.toUpperCase() === currency
     ? savedState
     : emptyLedgerState("deepseek-api", currency, DEFAULT_DAILY, DEFAULT_WEEKLY, DEFAULT_MONTHLY);

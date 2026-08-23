@@ -1,6 +1,5 @@
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { readJsonFile } from "../auth.js";
+import { readJsonFile } from "../core-auth.js";
+import { env, fetchQuota, homedir, join } from "../platform.js";
 import type { ModelRemain, QuotaResponse } from "./minimax.js";
 
 export class ClaudeAuthError extends Error {
@@ -53,7 +52,7 @@ interface UsageResponse {
 
 /** `~/.claude/.credentials.json` 路径 —— `$CLAUDE_CONFIG_DIR` 未设置时回退到 `~/.claude/` */
 function defaultAuthPath(): string {
-  const home = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
+  const home = env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
   return join(home, ".credentials.json");
 }
 
@@ -144,7 +143,7 @@ export async function queryQuota(
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-      const resp = await fetch(url, {
+      const resp = await fetchQuota(url, {
         method: "GET",
         headers,
         signal: ctrl.signal,

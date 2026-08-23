@@ -1,4 +1,6 @@
+import { loadPiAuthKey } from "../core-auth.js";
 import type { ModelRemain, QuotaResponse, WeeklyQuota } from "./minimax.js";
+import { env, fetchQuota } from "../platform.js";
 
 /** 区域：cn = 国内 bigmodel.cn，intl = 国际 z.ai */
 export type Region = "cn" | "intl";
@@ -76,7 +78,11 @@ export interface ZhipuQueryOptions {
 
 /** `ZHIPU_CN_API_KEY` 优先，缺省回退 `ZHIPU_API_KEY`（国际同形 / 兼容） */
 export function resolveZhipuApiKey(): string | undefined {
-  return process.env.ZHIPU_CN_API_KEY ?? process.env.ZHIPU_API_KEY;
+  for (const name of ["zai-coding-cn", "zhipu", "zai", "zai-coding-plan"]) {
+    const key = loadPiAuthKey(name);
+    if (key) return key;
+  }
+  return env.ZHIPU_CN_API_KEY ?? env.ZHIPU_API_KEY;
 }
 
 /**
@@ -107,7 +113,7 @@ export async function queryQuota(
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   let resp: Response;
   try {
-    resp = await fetch(ENDPOINTS[region], { method: "GET", headers, signal: ctrl.signal });
+    resp = await fetchQuota(ENDPOINTS[region], { method: "GET", headers, signal: ctrl.signal });
   } catch (e) {
     throw new ZhipuError(
       e instanceof Error && e.name === "AbortError" ? `timeout after ${timeoutMs}ms` : `network: ${e}`,

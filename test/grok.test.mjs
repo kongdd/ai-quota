@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import "../dist/node-platform.js";
 import { queryQuota } from "../dist/provider/grok.js";
 
 test("Grok mirrors weekly quota when monthly quota is disabled", async () => {

@@ -1,11 +1,19 @@
 {
   "name": "ai-quota",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Show AI coding-plan quota and API usage budget in the terminal",
   "type": "module",
   "bin": {
     "ai-quota": "./dist/cli.js",
     "ee-quota": "./dist/earthengine/ee-quota.js"
+  },
+  "exports": {
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "import": "./dist/browser.js"
+    },
+    "./dist/*": "./dist/*",
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",

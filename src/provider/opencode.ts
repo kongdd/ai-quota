@@ -1,11 +1,9 @@
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { env, fetchQuota, homedir, join, readFileSync } from "../platform.js";
 import type { ModelRemain, QuotaResponse } from "./minimax.js";
 import {
   resolveOpencodeGoLongWindowForQuery,
   type OpencodeGoLongWindow,
-} from "../config.js";
+} from "../core-config.js";
 
 /** OpenCode account server 默认地址 —— 自建可设 `$OPENCODE_SERVER` 覆盖 */
 const DEFAULT_SERVER = "https://opencode.ai";
@@ -33,7 +31,7 @@ interface ScrapedWindow {
 }
 
 function defaultEnvPath(): string {
-  if (process.env.OPENCODE_GO_ENV) return process.env.OPENCODE_GO_ENV;
+  if (env.OPENCODE_GO_ENV) return env.OPENCODE_GO_ENV;
   return join(homedir(), ".config", "ai-quota", "opencode.env");
 }
 
@@ -63,8 +61,8 @@ function loadOpencodeEnvFile(): OpencodeEnvVars {
 /** 从环境变量（或自动加载的 `opencode.env`）读 dashboard 抓取配置；任一缺失返回 undefined */
 export function loadOpencodeGoConfig(): OpencodeGoConfig | undefined {
   const file = loadOpencodeEnvFile();
-  const workspaceId = (process.env.OPENCODE_GO_WORKSPACE_ID?.trim() || file.workspaceId)?.trim();
-  const authCookie = (process.env.OPENCODE_GO_AUTH_COOKIE?.trim() || file.authCookie)?.trim();
+  const workspaceId = (env.OPENCODE_GO_WORKSPACE_ID?.trim() || file.workspaceId)?.trim();
+  const authCookie = (env.OPENCODE_GO_AUTH_COOKIE?.trim() || file.authCookie)?.trim();
   if (!workspaceId || !authCookie) return undefined;
   return { workspaceId, authCookie };
 }
@@ -147,12 +145,12 @@ export async function scrapeOpencodeGoDashboard(
 ): Promise<ModelRemain[]> {
   const allWindows = opts.allWindows === true;
   const longWindow = opts.longWindow ?? "monthly";
-  const baseUrl = opts.baseUrl ?? process.env.OPENCODE_SERVER ?? DEFAULT_SERVER;
+  const baseUrl = opts.baseUrl ?? env.OPENCODE_SERVER ?? DEFAULT_SERVER;
   const url = `${baseUrl}/workspace/${encodeURIComponent(cfg.workspaceId)}/go`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 15_000);
   try {
-    const resp = await fetch(url, {
+    const resp = await fetchQuota(url, {
       method: "GET",
       headers: {
         Cookie: `auth=${cfg.authCookie}`,

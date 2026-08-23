@@ -1,4 +1,5 @@
-import { loadPiAuthKey } from "../auth.js";
+import { loadPiAuthKey } from "../core-auth.js";
+import { env, fetchQuota } from "../platform.js";
 
 export type Region = "cn" | "intl";
 
@@ -70,7 +71,7 @@ export function resolveMinimaxApiKey(region: Region): string | undefined {
     const k = loadPiAuthKey(name);
     if (k) return k;
   }
-  return (region === "cn" ? process.env.MINIMAX_CN_API_KEY : undefined) ?? process.env.MINIMAX_API_KEY;
+  return (region === "cn" ? env.MINIMAX_CN_API_KEY : undefined) ?? env.MINIMAX_API_KEY;
 }
 
 /** 原始 API 响应字段（snake_case，外部接口） */
@@ -130,7 +131,7 @@ export async function queryQuota(
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   let resp: Response;
   try {
-    resp = await fetch(url, {
+    resp = await fetchQuota(url, {
       headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
       signal: ctrl.signal,
     });
