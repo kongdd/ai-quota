@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import "../dist/node-platform.js";
 import { piAuthCandidatePaths } from "../dist/auth.js";
 
 test("WSL candidate auth includes Windows pi auth from PATH", () => {

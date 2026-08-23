@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "./node-platform.js";
 import process from "node:process";
 import { parseArgs } from "node:util";
 import { computeDeepseekUsage, DeepSeekUsageError, defaultStatePath, type DeepseekComputeResult } from "./provider/deepseek.js";

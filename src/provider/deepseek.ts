@@ -6,7 +6,7 @@ import {
   resolveBudget,
   saveLedgerState,
   windowEnd,
-} from "../core-balance-ledger.js";
+} from "../balance-ledger.js";
 import type { ModelRemain } from "./minimax.js";
 import { env, fetchQuota } from "../platform.js";
 

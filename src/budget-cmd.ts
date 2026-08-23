@@ -1,3 +1,4 @@
+import "./node-platform.js";
 import process from "node:process";
 import { persistBudgetCaps } from "./balance-ledger.js";
 import { defaultStatePath } from "./provider/deepseek.js";

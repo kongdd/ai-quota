@@ -1,4 +1,4 @@
-import { loadPiAuthKey } from "../core-auth.js";
+import { loadPiAuthKey } from "../auth.js";
 import type { ModelRemain, QuotaResponse, WeeklyQuota } from "./minimax.js";
 import { env, fetchQuota } from "../platform.js";
 

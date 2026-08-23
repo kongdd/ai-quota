@@ -1,4 +1,4 @@
-import { readJsonFile } from "../core-auth.js";
+import { readJsonFile } from "../auth.js";
 import { env, fetchQuota, homedir, join } from "../platform.js";
 import type { ModelRemain, QuotaResponse } from "./minimax.js";
 

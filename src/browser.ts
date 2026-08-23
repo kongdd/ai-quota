@@ -1,5 +1,5 @@
-import { loadAuthConfig, loadPiAuthKey } from "./core-auth.js";
-import { queryQuotaSnapshot, type Provider, type QueryValues, type QuotaSnapshot } from "./core-query.js";
+import { loadAuthConfig, loadPiAuthKey } from "./auth.js";
+import { queryQuotaSnapshot, type Provider, type QueryValues, type QuotaSnapshot } from "./query.js";
 import { loadClaudeToken } from "./provider/claude.js";
 import { loadGrokSubscriptionConfig } from "./provider/grok.js";
 import { resolveKimiApiKey } from "./provider/kimi.js";

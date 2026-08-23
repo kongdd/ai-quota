@@ -1,4 +1,4 @@
-import { piAgentAuthPath, piAuthCandidatePaths, tryReadJsonFile } from "../core-auth.js";
+import { piAgentAuthPath, piAuthCandidatePaths, tryReadJsonFile } from "../auth.js";
 import { copyFileSync, fetchQuota, homedir, join, writeFileSync } from "../platform.js";
 import type { ModelRemain, QuotaResponse } from "./minimax.js";
 

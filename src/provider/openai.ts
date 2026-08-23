@@ -1,4 +1,4 @@
-import { piAgentAuthPath, readJsonFile, readPiAuthEntry } from "../core-auth.js";
+import { piAgentAuthPath, readJsonFile, readPiAuthEntry } from "../auth.js";
 import { env, fetchQuota, homedir, join, randomUUID } from "../platform.js";
 import type { ModelRemain, QuotaResponse } from "./minimax.js";
 

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import "../dist/node-platform.js";
 import { piAgentAuthPath } from "../dist/auth.js";
 import { queryBrowserQuota } from "../dist/browser.js";
 import { errorSnapshot, quotaSnapshot, runQuotaQuery } from "../dist/query.js";

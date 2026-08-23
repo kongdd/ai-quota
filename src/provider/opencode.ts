@@ -3,7 +3,7 @@ import type { ModelRemain, QuotaResponse } from "./minimax.js";
 import {
   resolveOpencodeGoLongWindowForQuery,
   type OpencodeGoLongWindow,
-} from "../core-config.js";
+} from "../config.js";
 
 /** OpenCode account server 默认地址 —— 自建可设 `$OPENCODE_SERVER` 覆盖 */
 const DEFAULT_SERVER = "https://opencode.ai";
