@@ -1,5 +1,5 @@
 import { loadAuthConfig, loadPiAuthKey } from "./core-auth.js";
-import { queryQuotaSnapshot, type Provider, type QuotaSnapshot } from "./core-query.js";
+import { queryQuotaSnapshot, type Provider, type QueryValues, type QuotaSnapshot } from "./core-query.js";
 import { loadClaudeToken } from "./provider/claude.js";
 import { loadGrokSubscriptionConfig } from "./provider/grok.js";
 import { resolveKimiApiKey } from "./provider/kimi.js";
@@ -17,6 +17,7 @@ export interface BrowserQueryOptions {
   home?: string;
   platform?: string;
   now?: number;
+  values?: QueryValues;
 }
 
 export interface BrowserQueryResult {
@@ -58,7 +59,7 @@ export function queryBrowserQuota(options: BrowserQueryOptions): Promise<Browser
     const previous = configurePlatform(memory.runtime);
     try {
       const providers = options.providers ?? detectedProviders();
-      const snapshot = await queryQuotaSnapshot({ providers, now: options.now });
+      const snapshot = await queryQuotaSnapshot({ providers, values: options.values, now: options.now });
       return { snapshot, writes: memory.writes() };
     } finally {
       configurePlatform(previous);

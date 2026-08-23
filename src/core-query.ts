@@ -83,20 +83,29 @@ function displayName(name: string): string {
   return name;
 }
 
+const timeoutMs = (values: QueryValues) => values["timeout-ms"] as number | undefined;
+const retries = (values: QueryValues) => values.retries as number | undefined;
+
 async function runMinimax(values: QueryValues): Promise<ModelRemain[]> {
   const region = (values.region ?? "cn") as Region;
   if (region !== "cn" && region !== "intl") throw new Error("--region must be cn or intl");
   const key = resolveMinimaxApiKey(region);
   if (!key) throw new Error("API key required: set MINIMAX_CN_API_KEY or MINIMAX_API_KEY env, or add to ~/.pi/agent/auth.json");
-  return (await queryMinimax(key, region)).model_remains;
+  return (await queryMinimax(key, region, undefined, timeoutMs(values))).model_remains;
 }
 
 async function runOpenai(values: QueryValues): Promise<ModelRemain[]> {
-  return (await queryOpenai(loadCodexToken(values["codex-auth"] as string | undefined))).model_remains;
+  return (await queryOpenai(loadCodexToken(values["codex-auth"] as string | undefined), {
+    timeoutMs: timeoutMs(values),
+    retries: retries(values),
+  })).model_remains;
 }
 
 async function runClaude(values: QueryValues): Promise<ModelRemain[]> {
-  return (await queryClaude(loadClaudeToken(values["claude-auth"] as string | undefined))).model_remains;
+  return (await queryClaude(loadClaudeToken(values["claude-auth"] as string | undefined), {
+    timeoutMs: timeoutMs(values),
+    retries: retries(values),
+  })).model_remains;
 }
 
 function opencodeLongWindow(values: QueryValues) {
@@ -105,8 +114,10 @@ function opencodeLongWindow(values: QueryValues) {
 }
 
 async function runOpencode(values: QueryValues): Promise<ModelRemain[]> {
-  if (values["opencode-long-all"] === true) return (await queryOpencode({ allWindows: true })).model_remains;
-  return (await queryOpencode({ longWindow: opencodeLongWindow(values) })).model_remains;
+  if (values["opencode-long-all"] === true) {
+    return (await queryOpencode({ allWindows: true, timeoutMs: timeoutMs(values) })).model_remains;
+  }
+  return (await queryOpencode({ longWindow: opencodeLongWindow(values), timeoutMs: timeoutMs(values) })).model_remains;
 }
 
 async function runDeepseek(values: QueryValues): Promise<ModelRemain[]> {
@@ -123,14 +134,14 @@ async function runDeepseek(values: QueryValues): Promise<ModelRemain[]> {
   })).modelRemains;
 }
 
-async function runGrok(): Promise<ModelRemain[]> {
-  return (await queryGrok()).model_remains;
+async function runGrok(values: QueryValues): Promise<ModelRemain[]> {
+  return (await queryGrok({ timeoutMs: timeoutMs(values) })).model_remains;
 }
 
-async function runKimi(): Promise<ModelRemain[]> {
+async function runKimi(values: QueryValues): Promise<ModelRemain[]> {
   const key = resolveKimiApiKey();
   if (!key) throw new Error("API key required: set KIMI_API_KEY or MOONSHOT_API_KEY env");
-  return (await queryKimi(key)).model_remains;
+  return (await queryKimi(key, timeoutMs(values))).model_remains;
 }
 
 async function runZhipu(values: QueryValues): Promise<ModelRemain[]> {
@@ -141,6 +152,7 @@ async function runZhipu(values: QueryValues): Promise<ModelRemain[]> {
   return (await queryZhipu(key, region as ZhipuRegion, {
     organization: values["zhipu-org"] as string | undefined,
     project: values["zhipu-project"] as string | undefined,
+    timeoutMs: timeoutMs(values),
   })).model_remains;
 }
 
@@ -229,7 +241,7 @@ export function errorSnapshot(error: unknown): QuotaErrorSnapshot {
   const lower = message.toLowerCase();
   const code = httpStatus === 401 || httpStatus === 403 || /api key required|credentials?.*(missing|not found)|token.*missing|auth_mode|workspace_id.*cookie.*not set/.test(lower)
     ? "auth"
-    : /timeout|timed out/.test(lower)
+    : /timeout|timed out|request cancelled/.test(lower)
       ? "timeout"
       : /network|fetch failed|connect/.test(lower)
         ? "network"
