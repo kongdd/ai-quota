@@ -1,7 +1,7 @@
 import { copyFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { piAgentAuthPath, tryReadJsonFile } from "../auth.js";
+import { piAgentAuthPath, piAuthCandidatePaths, tryReadJsonFile } from "../auth.js";
 import type { ModelRemain, QuotaResponse } from "./minimax.js";
 
 /** Grok Build CLI 代理的 billing 端点（cli-chat-proxy.grok.com）—— 与官方 `grok /usage` 同源。 */
@@ -27,6 +27,8 @@ export interface GrokSubscriptionConfig {
   accessToken: string;
   /** API base（含 /v1）；缺省 DEFAULT_BASE_URL */
   baseUrl?: string;
+  /** 实际读到 token 的 auth.json，刷新时写回此文件 */
+  authPath?: string;
 }
 
 function officialGrokAuthPath(): string {
@@ -92,18 +94,16 @@ function loadFromOfficialGrokAuth(parsed: unknown): GrokSubscriptionConfig | und
  * @param authPath 主 auth.json 路径（默认 `~/.pi/agent/auth.json`）；也可传官方 `~/.grok/auth.json`。
  */
 export function loadGrokSubscriptionConfig(authPath = piAgentAuthPath()): GrokSubscriptionConfig | undefined {
-  // 1. 主路径：先按 pi agent 形态解析，再按官方 Grok CLI 形态解析（同一路径可能是两种文件之一）
-  const primary = readJson(authPath);
-  const fromPi = loadFromPiAuth(primary);
-  if (fromPi) return fromPi;
-  const fromOfficialPrimary = loadFromOfficialGrokAuth(primary);
-  if (fromOfficialPrimary) return fromOfficialPrimary;
-
-  // 2. 回退：主路径不是官方路径时，再试 `~/.grok/auth.json`
+  const paths = piAuthCandidatePaths(authPath);
+  for (const p of paths) {
+    const parsed = readJson(p);
+    const cfg = loadFromPiAuth(parsed) ?? loadFromOfficialGrokAuth(parsed);
+    if (cfg) return { ...cfg, authPath: p };
+  }
   const official = officialGrokAuthPath();
-  if (authPath !== official) {
-    const fromOfficial = loadFromOfficialGrokAuth(readJson(official));
-    if (fromOfficial) return fromOfficial;
+  if (!paths.includes(official)) {
+    const cfg = loadFromOfficialGrokAuth(readJson(official));
+    if (cfg) return { ...cfg, authPath: official };
   }
   return undefined;
 }
@@ -297,7 +297,7 @@ export async function queryQuota(
     );
   }
   const timeoutMs = opts.timeoutMs ?? 15_000;
-  const accessToken = await ensureFreshAccessToken(authPath, cfg.accessToken);
+  const accessToken = await ensureFreshAccessToken(cfg.authPath ?? authPath, cfg.accessToken);
 
   const monthlyResp = await fetchBilling("", accessToken, timeoutMs, cfg.baseUrl);
   const config = monthlyResp.config;

@@ -25,10 +25,13 @@ const PI_AUTH_PROVIDER_KEYS: Partial<Record<KnownProvider, readonly string[]>> =
 
 /** pi auth.json 中存在任一 `keys` 命名条目时返回 true。文件缺失/JSON 错 → false。 */
 function piAuthHasAny(keys: readonly string[]): boolean {
-  const root = tryReadJsonFile(piAgentAuthPath());
-  if (!root || typeof root !== "object") return false;
-  const obj = root as Record<string, unknown>;
-  return keys.some((k) => obj[k] && typeof obj[k] === "object");
+  for (const path of piAuthCandidatePaths()) {
+    const root = tryReadJsonFile(path);
+    if (!root || typeof root !== "object") continue;
+    const obj = root as Record<string, unknown>;
+    if (keys.some((k) => obj[k] && typeof obj[k] === "object")) return true;
+  }
+  return false;
 }
 
 /** 缺省启用规则：未在 cfg 显式声明时按 pi auth.json 实际授权情况判定。
@@ -84,12 +87,48 @@ export function piAgentAuthPath(): string {
   return join(homedir(), ".pi", "agent", "auth.json");
 }
 
+/** WSL 下从 PATH / USERPROFILE 推断 Windows 用户主目录。 */
+function windowsHomes(): string[] {
+  const homes: string[] = [];
+  const add = (h: string) => {
+    const n = h.replace(/[\\/]+$/, "");
+    if (n && !homes.includes(n)) homes.push(n);
+  };
+  const up = process.env.USERPROFILE;
+  if (up) {
+    const m = up.match(/^([A-Za-z]):[\\/](.*)$/);
+    const drive = m?.[1];
+    const rest = m?.[2];
+    add(process.platform !== "win32" && drive && rest !== undefined
+      ? `/mnt/${drive.toLowerCase()}/${rest.replace(/\\/g, "/")}`
+      : up);
+  }
+  for (const m of (process.env.PATH ?? "").matchAll(/(?:^|:)(\/mnt\/[a-z]\/Users\/[^/:]+)/g)) {
+    if (m[1]) add(m[1]);
+  }
+  return homes;
+}
+
+/** 本机 auth.json，以及 WSL 下 Windows 用户的同名文件。显式路径 / PI_CONFIG_DIR 不追加。 */
+export function piAuthCandidatePaths(primary = piAgentAuthPath()): string[] {
+  const paths = [primary];
+  if (process.env.PI_CONFIG_DIR || primary !== piAgentAuthPath()) return paths;
+  for (const home of windowsHomes()) {
+    const p = join(home, ".pi", "agent", "auth.json");
+    if (p !== primary && existsSync(p)) paths.push(p);
+  }
+  return paths;
+}
+
 /** 从 pi agent auth.json 读取 `entryName` 条目；文件不存在/JSON 错/条目不是对象时返回 `undefined`。 */
 export function readPiAuthEntry(entryName: string, authPath = piAgentAuthPath()): Record<string, unknown> | undefined {
-  const root = tryReadJsonFile(authPath);
-  if (!root || typeof root !== "object") return undefined;
-  const entry = (root as Record<string, unknown>)[entryName];
-  return entry && typeof entry === "object" ? (entry as Record<string, unknown>) : undefined;
+  for (const path of piAuthCandidatePaths(authPath)) {
+    const root = tryReadJsonFile(path);
+    if (!root || typeof root !== "object") continue;
+    const entry = (root as Record<string, unknown>)[entryName];
+    if (entry && typeof entry === "object") return entry as Record<string, unknown>;
+  }
+  return undefined;
 }
 
 /** 从 pi agent auth.json 读取 `entryName` 条目下的 api key；支持 `key / access / access_token / token` 字段。 */

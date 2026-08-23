@@ -1,6 +1,6 @@
 {
   "name": "ai-quota",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Show AI coding-plan quota and API usage budget in the terminal",
   "type": "module",
   "bin": {
@@ -18,6 +18,8 @@
     "start": "node --enable-source-maps dist/cli.js",
     "dev": "npm run build && npm start",
     "test": "npm run build && node --test",
+    "desktop:dev": "npm --prefix apps/desktop run tauri dev",
+    "desktop:build": "npm --prefix apps/desktop run tauri build",
     "mobile:dev": "npm --prefix apps/mobile run tauri dev",
     "mobile:build": "npm --prefix apps/mobile run build",
     "mobile:android": "npm --prefix apps/mobile run tauri android dev",
