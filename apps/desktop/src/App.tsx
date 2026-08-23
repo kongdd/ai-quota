@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { queryQuota } from "./api";
-import type { Provider, ProviderSnapshot, QuotaPeriod, QuotaWindow } from "./types";
+import { mergeProvider, PROVIDERS, type Provider, type ProviderSnapshot, type QuotaPeriod, type QuotaWindow } from "./types";
 
 const LABELS: Record<Provider, string> = {
   minimax: "MiniMax",
@@ -88,8 +88,9 @@ function tone(percent: number): Target["tone"] {
 
 function targetsOf(providers: ProviderSnapshot[]): Target[] {
   const targets: Target[] = [];
-  for (const provider of providers) {
-    if (provider.status !== "ok") continue;
+  for (const name of PROVIDERS) {
+    const provider = providers.find((item) => item.provider === name);
+    if (!provider || provider.status !== "ok") continue;
     for (const model of provider.models) {
       const base = `${LABELS[provider.provider]} · ${model.name}`;
       if (model.balance) {
@@ -138,10 +139,12 @@ function targetId(provider: Provider, model: string, key: string) {
 }
 
 function ProviderCard({
-  data, selectedId, onSelect,
+  data, refreshing, selectedId, onRefresh, onSelect,
 }: {
   data: ProviderSnapshot;
+  refreshing: boolean;
   selectedId?: string;
+  onRefresh: () => void;
   onSelect: (id: string) => void;
 }) {
   const meta = MARKS[data.provider];
@@ -150,6 +153,9 @@ function ProviderCard({
       <header className="provider-head">
         <span className={`provider-mark ${meta.tone}`}>{meta.mark}</span>
         <strong>{LABELS[data.provider]}</strong>
+        <button type="button" className="provider-refresh" onClick={onRefresh} disabled={refreshing} aria-label={`刷新 ${LABELS[data.provider]}`} title="刷新">
+          {refreshing ? "…" : "↻"}
+        </button>
       </header>
       {data.status === "error" ? <p className="provider-error">{data.error.message}</p> : data.models.map((model) => {
         const windows = Object.entries(model.windows) as [QuotaPeriod, QuotaWindow][];
@@ -192,6 +198,7 @@ export default function App() {
   const [providers, setProviders] = useState<ProviderSnapshot[]>([]);
   const [refreshedAt, setRefreshedAt] = useState<number>();
   const [initializing, setInitializing] = useState(true);
+  const [refreshing, setRefreshing] = useState<Provider[]>([]);
   const [error, setError] = useState("");
 
   const refreshAll = useCallback(async () => {
@@ -207,6 +214,24 @@ export default function App() {
     }
   }, []);
 
+  const refreshProvider = useCallback(async (provider: Provider) => {
+    setError("");
+    setRefreshing((current) => [...current, provider]);
+    try {
+      const snapshot = await queryQuota([provider]);
+      const next = snapshot.providers[0];
+      if (next) setProviders((current) => mergeProvider(current, next));
+      setRefreshedAt(Date.parse(snapshot.generatedAt));
+    } catch (cause) {
+      setError(`${message(cause)}（详见 EXE 同目录 log.txt）`);
+    } finally {
+      setRefreshing((current) => current.filter((item) => item !== provider));
+    }
+  }, []);
+
+  const orderedProviders = PROVIDERS.flatMap((provider) =>
+    providers.filter((item) => item.provider === provider),
+  );
   const targets = useMemo(() => targetsOf(providers), [providers]);
   const selected = targets.find((target) => target.id === config.target) ?? targets[0];
 
@@ -299,10 +324,17 @@ export default function App() {
       </section>
 
       <section className="quota-list">
-        <h2>全部模型 <small>{providers.length ? `${providers.length} Provider` : initializing ? "加载中" : "无数据"}{config.paused && " · 已暂停"}</small></h2>
-        {providers.length ? providers.map((provider) => (
-          <ProviderCard key={provider.provider} data={provider} selectedId={selected?.id} onSelect={(id) => setConfig({ ...config, target: id })} />
-        )) : <p className="empty">{initializing ? "正在读取本地凭据并查询额度…" : "未找到可用额度数据。"}</p>}
+        <h2>全部模型 <small>{initializing ? "查询中" : `${providers.length} Provider`}{config.paused && " · 已暂停"}</small></h2>
+        {orderedProviders.map((provider) => (
+          <ProviderCard
+            key={provider.provider}
+            data={provider}
+            refreshing={refreshing.includes(provider.provider)}
+            selectedId={selected?.id}
+            onRefresh={() => void refreshProvider(provider.provider)}
+            onSelect={(id) => setConfig({ ...config, target: id })}
+          />
+        ))}
       </section>
 
       {error && <p className="error">{error}</p>}

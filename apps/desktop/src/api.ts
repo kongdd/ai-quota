@@ -7,7 +7,7 @@ import {
   proxyLabel,
   requestLabel,
 } from "./network";
-import type { QuotaSnapshot } from "./types";
+import type { Provider, QuotaSnapshot } from "./types";
 
 interface RuntimeSnapshot {
   home: string;
@@ -28,9 +28,9 @@ const appendLog = async (message: string) => {
   }
 };
 
-export function queryQuota(): Promise<QuotaSnapshot> {
+export function queryQuota(providers?: Provider[]): Promise<QuotaSnapshot> {
   const run = queue.then(async () => {
-    await appendLog("=== query start ===");
+    await appendLog(`=== query start providers=${providers?.join(",") ?? "enabled"} ===`);
     try {
       const runtime = JSON.parse(await invoke<string>("read_runtime")) as RuntimeSnapshot;
       const controller = new AbortController();
@@ -58,6 +58,7 @@ export function queryQuota(): Promise<QuotaSnapshot> {
 
       const query = queryBrowserQuota({
         ...runtime,
+        providers,
         fetch,
         values: DESKTOP_QUERY_VALUES,
       });

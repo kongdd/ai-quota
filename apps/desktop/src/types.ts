@@ -1,12 +1,13 @@
+// 与 CLI format.ts 的显示顺序一致。
 export const PROVIDERS = [
-  "minimax",
-  "openai",
   "claude",
-  "opencode",
-  "deepseek-api",
+  "openai",
   "grok",
+  "opencode",
+  "minimax",
   "kimi",
   "zhipu",
+  "deepseek-api",
 ] as const;
 
 export type Provider = (typeof PROVIDERS)[number];
@@ -43,4 +44,10 @@ export interface QuotaSnapshot {
   generatedAt: string;
   status: "ok" | "partial" | "error";
   providers: ProviderSnapshot[];
+}
+
+export function mergeProvider(snapshots: ProviderSnapshot[], next: ProviderSnapshot): ProviderSnapshot[] {
+  return snapshots.some(({ provider }) => provider === next.provider)
+    ? snapshots.map((snapshot) => snapshot.provider === next.provider ? next : snapshot)
+    : [...snapshots, next];
 }

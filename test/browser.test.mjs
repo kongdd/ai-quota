@@ -52,6 +52,23 @@ test("browser core has no Node runtime dependency and restores the caller runtim
   assert.equal(piAgentAuthPath(), nodeAuthPath);
 });
 
+test("browser uses CLI enablement instead of auto-enabling available credentials", async () => {
+  let fetched = false;
+  const result = await queryBrowserQuota({
+    env: {
+      OPENCODE_GO_WORKSPACE_ID: "workspace",
+      OPENCODE_GO_AUTH_COOKIE: "cookie",
+      XDG_CONFIG_HOME: "/config",
+    },
+    fetch: async () => {
+      fetched = true;
+      return Response.json({});
+    },
+  });
+  assert.deepEqual(result.snapshot.providers, []);
+  assert.equal(fetched, false);
+});
+
 test("Tauri cancellation is reported as timeout", () => {
   assert.equal(errorSnapshot(new Error("Request cancelled")).code, "timeout");
 });

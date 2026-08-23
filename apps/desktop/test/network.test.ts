@@ -6,6 +6,7 @@ import {
   proxyLabel,
   requestLabel,
 } from "../src/network.ts";
+import { PROVIDERS } from "../src/types.ts";
 
 test("direct connection needs no proxy environment", () => {
   assert.equal(proxyFrom({}), undefined);
@@ -27,6 +28,19 @@ test("proxy environment supports lowercase fallback and no_proxy", () => {
 test("log labels omit proxy credentials and request query", () => {
   assert.equal(proxyLabel({ all: "http://user:secret@127.0.0.1:7890" }), "http://127.0.0.1:7890");
   assert.equal(requestLabel("https://example.com/quota?token=secret", "post"), "POST https://example.com/quota");
+});
+
+test("desktop follows CLI provider order", () => {
+  assert.deepEqual(PROVIDERS, [
+    "claude",
+    "openai",
+    "grok",
+    "opencode",
+    "minimax",
+    "kimi",
+    "zhipu",
+    "deepseek-api",
+  ]);
 });
 
 test("desktop bounds each provider query without retries", () => {
