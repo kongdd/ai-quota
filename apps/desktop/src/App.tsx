@@ -6,7 +6,7 @@ import { mergeProvider, PROVIDERS, type Provider, type ProviderSnapshot, type Qu
 
 const LABELS: Record<Provider, string> = {
   minimax: "MiniMax",
-  openai: "OpenAI Codex",
+  openai: "OpenAI",
   claude: "Claude",
   opencode: "OpenCode Go",
   "deepseek-api": "DeepSeek",
@@ -77,13 +77,18 @@ function loadConfig(): Config {
 }
 
 function used(window: QuotaWindow): number {
-  return Math.round(Math.max(0, Math.min(100, Number.isFinite(window.remainingPercent)
+  return Math.max(0, Math.min(100, Number.isFinite(window.remainingPercent)
     ? 100 - window.remainingPercent
-    : window.usedPercent)));
+    : window.usedPercent));
 }
 
 function tone(percent: number): Target["tone"] {
   return percent < 50 ? "safe" : percent < 80 ? "warn" : "danger";
+}
+
+function visibleWindows(provider: Provider, windows: Partial<Record<QuotaPeriod, QuotaWindow>>) {
+  return (Object.entries(windows) as [QuotaPeriod, QuotaWindow][])
+    .filter(([period]) => provider !== "deepseek-api" || period !== "monthly");
 }
 
 function targetsOf(providers: ProviderSnapshot[]): Target[] {
@@ -98,21 +103,21 @@ function targetsOf(providers: ProviderSnapshot[]): Target[] {
         targets.push({
           id: targetId(provider.provider, model.name, "balance"),
           provider: provider.provider,
-          label: `${base} · 余额`,
+          label: `${LABELS[provider.provider]} 余额`,
           text: `￥${amount}`,
           tone: "balance",
           tooltip: `${base}：￥${amount}`,
         });
       }
-      for (const [period, window] of Object.entries(model.windows) as [QuotaPeriod, QuotaWindow][]) {
+      for (const [period, window] of visibleWindows(provider.provider, model.windows)) {
         const percent = used(window);
         targets.push({
           id: targetId(provider.provider, model.name, period),
           provider: provider.provider,
-          label: `${base} · ${PERIODS[period]}`,
-          text: `${percent}%`,
+          label: `${LABELS[provider.provider]} ${PERIOD_SHORT[period]}`,
+          text: `${Math.round(percent)}%`,
           tone: tone(percent),
-          tooltip: `${base} · ${PERIODS[period]}：${percent}% 已用`,
+          tooltip: `${base} · ${PERIODS[period]}：${percent.toFixed(1)}% 已用`,
         });
       }
     }
@@ -148,21 +153,26 @@ function ProviderCard({
   onSelect: (id: string) => void;
 }) {
   const meta = MARKS[data.provider];
+  const singleModel = data.status === "ok" && data.models.length === 1 ? data.models[0] : undefined;
+  const headerBalance = singleModel?.balance && Object.keys(singleModel.windows).length
+    ? `￥${singleModel.balance.amount.toFixed(1)}`
+    : undefined;
   return (
     <article className="provider-card">
       <header className="provider-head">
         <span className={`provider-mark ${meta.tone}`}>{meta.mark}</span>
         <strong>{LABELS[data.provider]}</strong>
+        {headerBalance && <b className="provider-balance">{headerBalance}</b>}
         <button type="button" className="provider-refresh" onClick={onRefresh} disabled={refreshing} aria-label={`刷新 ${LABELS[data.provider]}`} title="刷新">
           {refreshing ? "…" : "↻"}
         </button>
       </header>
       {data.status === "error" ? <p className="provider-error">{data.error.message}</p> : data.models.map((model) => {
-        const windows = Object.entries(model.windows) as [QuotaPeriod, QuotaWindow][];
+        const windows = visibleWindows(data.provider, model.windows);
         const balanceId = targetId(data.provider, model.name, "balance");
         return (
           <section className="model" key={model.name}>
-            {(data.models.length > 1 || windows.length > 0) && (
+            {data.models.length > 1 && (
               <div className="model-name">
                 <span>{model.name}</span>
                 {model.balance && windows.length > 0 && <b>￥{model.balance.amount.toFixed(1)}</b>}
@@ -181,7 +191,7 @@ function ProviderCard({
                 <button type="button" className={`quota-row${id === selectedId ? " is-selected" : ""}`} key={period} onClick={() => onSelect(id)} title="设为托盘显示">
                   <span>{PERIOD_SHORT[period]}</span>
                   <div className={`progress ${tone(percent)}`} aria-hidden><i style={{ width: `${percent}%` }} /></div>
-                  <strong className={tone(percent)}>{percent}%</strong>
+                  <strong className={tone(percent)}>{percent.toFixed(1)}%</strong>
                   <small>{remainingTime(window.resetsAt)}</small>
                 </button>
               );

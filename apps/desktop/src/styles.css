@@ -7,7 +7,7 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 360px; min-height: 480px; }
+body { margin: 0; min-width: 360px; min-height: 360px; }
 button, input, select { font: inherit; }
 button, select { color: inherit; }
 button { cursor: pointer; }
@@ -31,6 +31,8 @@ header, header > div, header > div > div, label { display: flex; }
 label { min-width: 0; flex-direction: column; gap: 4px; }
 label > span { font-size: 10px; font-weight: 700; }
 select, input { width: 100%; height: 32px; padding: 0 8px; color: inherit; border: 1px solid var(--line); border-radius: 7px; outline: 0; background: rgba(255, 255, 255, .86); }
+input[type="number"] { appearance: textfield; }
+input[type="number"]::-webkit-inner-spin-button { appearance: none; margin: 0; }
 select:focus, input:focus { border-color: rgba(47, 191, 102, .55); box-shadow: 0 0 0 2px rgba(47, 191, 102, .1); }
 .interval > div { position: relative; }
 .interval input { padding-right: 23px; font-variant-numeric: tabular-nums; }
@@ -43,8 +45,9 @@ select:focus, input:focus { border-color: rgba(47, 191, 102, .55); box-shadow: 0
 .quota-list > h2 { display: flex; align-items: baseline; justify-content: space-between; margin: 0; font-size: 12px; }
 .quota-list > h2 small { color: var(--muted); font-size: 11px; font-weight: 500; }
 .provider-card { padding: 10px 10px 8px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255, 255, 255, .82); box-shadow: 0 2px 10px rgba(26, 49, 34, .04); }
-.provider-head { display: grid; grid-template-columns: 26px 1fr 26px; align-items: center; gap: 8px; margin: 0; }
+.provider-head { display: grid; grid-template-columns: 26px 1fr auto auto; align-items: center; gap: 8px; margin: 0; }
 .provider-head strong { font-size: 13px; letter-spacing: -.02em; }
+.provider-balance { color: #565fc2; font-size: 13px; font-variant-numeric: tabular-nums; }
 .provider-refresh { width: 26px; height: 26px; padding: 0; color: var(--muted); border: 0; border-radius: 7px; background: transparent; }
 .provider-refresh:hover { color: #2d7950; background: rgba(24, 48, 32, .06); }
 .provider-mark { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 8px; font-size: 12px; font-weight: 800; }
@@ -91,6 +94,13 @@ select:focus, input:focus { border-color: rgba(47, 191, 102, .55); box-shadow: 0
 .quota-row strong.danger, .provider-error { color: #c94d43; }
 .provider-error { margin: 6px 0 0; font-size: 9px; }
 .error { margin: 0 0 8px; color: #b84b40; font-size: 10px; }
+
+@media (min-width: 430px) {
+  .controls { grid-template-columns: minmax(0, 1fr) 76px 64px 120px; }
+  .quiet { grid-column: auto; }
+  .quota-list { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .quota-list > h2 { grid-column: 1 / -1; }
+}
 
 @media (prefers-color-scheme: dark) {
   :root { color: #e7eee9; background: #0e1511; --muted: #8d9a92; --line: rgba(228, 240, 232, .11); }

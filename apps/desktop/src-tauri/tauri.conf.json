@@ -14,10 +14,10 @@
       {
         "label": "main",
         "title": "AI Quota",
-        "width": 420,
-        "height": 640,
+        "width": 450,
+        "height": 400,
         "minWidth": 380,
-        "minHeight": 480,
+        "minHeight": 360,
         "visible": false,
         "skipTaskbar": true,
         "resizable": true
