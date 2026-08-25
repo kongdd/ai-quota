@@ -54,12 +54,17 @@ earthengine set_project <PROJECT_ID>
 
 若无法启用，请让项目所有者进入 [IAM](https://console.cloud.google.com/iam-admin/iam)，点击**授予访问权限**，添加你的 Google 账号，并授予 **Service Usage Admin** 角色。
 
-3. 查询月额度：
+3. 启用项目并查询月额度：
 
 ```bash
-ee-quota config set project <PROJECT_ID>
+ee-quota auth enable gee-hydro
+ee-quota auth enable gee-kongdd
+ee-quota auth list
+ee-quota auth disable gee-kongdd
+
 ee-quota config --unit h   # s 或 h
-ee-quota
+ee-quota                   # 所有已启用 project
+ee-quota -p gee-hydro      # 指定 project
 ```
 
 Earth Engine 凭据默认位于 `~/.config/earthengine/credentials`，详见 [Earth Engine Authentication](https://developers.google.com/earth-engine/guides/auth)。

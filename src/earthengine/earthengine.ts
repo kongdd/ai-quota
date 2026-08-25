@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -10,7 +10,7 @@ const CLIENT_SECRET = "RUP0RZ6e0pPhDzsqIJ7KlNd1";
 
 type EarthEngineConfig = {
   [key: string]: unknown;
-  eeQuota?: { unit?: string };
+  eeQuota?: { unit?: string; projects?: Record<string, boolean> };
 };
 
 type EarthEngineCredentials = {
@@ -40,14 +40,9 @@ function readJson<T>(path: string): T | undefined {
   }
 }
 
-function writeJson(path: string, value: unknown, mode?: number): void {
+function writeJson(path: string, value: unknown): void {
   mkdirSync(dirname(path), { recursive: true });
-  const text = JSON.stringify(value, null, 2) + "\n";
-  if (mode === undefined) writeFileSync(path, text);
-  else {
-    writeFileSync(path, text, { mode });
-    try { chmodSync(path, mode); } catch {}
-  }
+  writeFileSync(path, JSON.stringify(value, null, 2) + "\n");
 }
 
 function loadConfig(): EarthEngineConfig {
@@ -66,10 +61,6 @@ function loadCredentials(): EarthEngineCredentials {
   return credentials;
 }
 
-function saveCredentials(credentials: EarthEngineCredentials): void {
-  writeJson(earthEngineCredentialsPath(), credentials, 0o600);
-}
-
 export function getEeQuotaUnit(): EeQuotaUnit {
   return loadConfig().eeQuota?.unit === "h" ? "h" : "s";
 }
@@ -80,14 +71,43 @@ export function setEeQuotaUnit(unit: EeQuotaUnit): void {
 }
 
 export function getEeQuotaProject(): string | undefined {
-  const project = loadCredentials().project?.trim();
-  return project || undefined;
+  try {
+    const project = loadCredentials().project?.trim();
+    return project || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
-export function setEeQuotaProject(project: string): void {
-  const credentials = loadCredentials();
-  credentials.project = project.trim();
-  saveCredentials(credentials);
+function projectMap(): Record<string, boolean> {
+  return { ...loadConfig().eeQuota?.projects };
+}
+
+export function listEeProjects(): string[] {
+  const names = Object.keys(projectMap());
+  if (names.length) return names;
+  const cred = getEeQuotaProject();
+  return cred ? [cred] : [];
+}
+
+export function isEeProjectEnabled(name: string): boolean {
+  const map = projectMap();
+  if (Object.keys(map).length) return map[name] === true;
+  return name === getEeQuotaProject();
+}
+
+export function setEeProjectEnabled(name: string, enabled: boolean): void {
+  const id = name.trim();
+  if (!id) throw new Error("project id is required");
+  const config = loadConfig();
+  saveConfig({
+    ...config,
+    eeQuota: { ...config.eeQuota, projects: { ...config.eeQuota?.projects, [id]: enabled } },
+  });
+}
+
+export function enabledEeProjects(): string[] {
+  return listEeProjects().filter(isEeProjectEnabled);
 }
 
 let cachedToken: { value: string; expiresAt: number } | undefined;

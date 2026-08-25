@@ -3,9 +3,11 @@ import {
   earthEngineConfigPath,
   earthEngineCredentialsPath,
   getEarthEngineAccessToken,
-  getEeQuotaProject,
+  enabledEeProjects,
   getEeQuotaUnit,
-  setEeQuotaProject,
+  isEeProjectEnabled,
+  listEeProjects,
+  setEeProjectEnabled,
   setEeQuotaUnit,
   type EeQuotaUnit,
 } from "./earthengine.js";
@@ -19,8 +21,9 @@ export const EE_QUOTA_HELP = `Usage: ee-quota [options]
 Show Earth Engine's monthly EECU quota and usage.
 
 Options:
-  --minutes <N>        Usage lookback window (default: current month)
-  --unit <s|h>         Display seconds or hours (default: configured s)
+  -p, --project <ID>    One or more projects (repeatable or comma-separated)
+  --minutes <N>         Usage lookback window (default: current month)
+  --unit <s|h>          Display seconds or hours (default: configured s)
   --no-live             Skip live quota and usage lookup
   -w, --watch           Refresh in place until Ctrl+C
   -i, --interval <N>    Refresh interval (30, 30s, 1m; implies --watch)
@@ -28,7 +31,9 @@ Options:
   -h, --help            Show this help
 
 Commands:
-  ee-quota config set project <ID>
+  ee-quota auth list
+  ee-quota auth enable <PROJECT>
+  ee-quota auth disable <PROJECT>
   ee-quota config set unit <s|h>
   ee-quota config --unit s|h
 
@@ -58,6 +63,7 @@ interface Report {
 }
 
 interface Options {
+  projects?: string[];
   minutes?: number;
   unit?: EeQuotaUnit;
   noLive: boolean;
@@ -81,10 +87,12 @@ function valueOf(info: QuotaInfo): number | undefined {
   return parseNumber(info.value ?? info.quotaValue ?? info.effectiveLimit);
 }
 
-async function resolveProject(): Promise<string> {
-  const project = getEeQuotaProject();
-  if (!project) throw new Error(`Earth Engine project is missing in ${earthEngineCredentialsPath()}`);
-  return project;
+function resolveProjects(options: Options): string[] {
+  const requested = [...new Set(options.projects ?? [])];
+  if (requested.length) return requested;
+  const enabled = enabledEeProjects();
+  if (!enabled.length) throw new Error("no projects enabled. Run `ee-quota auth enable <PROJECT>`");
+  return enabled;
 }
 
 async function fetchJson(url: string, token: string, project: string): Promise<Record<string, unknown>> {
@@ -138,15 +146,12 @@ async function fetchUsage(project: string, token: string, minutes?: number): Pro
   return latest ? { value: pointValue(latest), endTime: latest.interval?.endTime } : {};
 }
 
-async function query(options: Options): Promise<Report> {
-  const project = await resolveProject();
+async function queryOne(project: string, token: string | undefined, options: Options): Promise<Report> {
   const report: Report = { project, warnings: [] };
-  if (options.noLive) {
+  if (options.noLive || !token) {
     report.warnings.push("Live quota lookup skipped because --no-live was set.");
     return report;
   }
-
-  const token = await getEarthEngineAccessToken();
   const [limit, usage] = await Promise.allSettled([
     fetchLimit(project, token),
     fetchUsage(project, token, options.minutes),
@@ -167,9 +172,22 @@ async function query(options: Options): Promise<Report> {
   return report;
 }
 
-function displayValue(seconds: number, unit: EeQuotaUnit): string {
-  const value = unit === "h" ? seconds / 3600 : seconds;
-  return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+async function query(options: Options): Promise<Report[]> {
+  const projects = resolveProjects(options);
+  const token = options.noLive ? undefined : await getEarthEngineAccessToken();
+  return Promise.all(projects.map((project) => queryOne(project, token, options)));
+}
+
+function toUnit(seconds: number, unit: EeQuotaUnit): number {
+  return unit === "h" ? seconds / 3600 : seconds;
+}
+
+function displayUsed(seconds: number, unit: EeQuotaUnit): string {
+  return toUnit(seconds, unit).toFixed(1);
+}
+
+function displayLimit(seconds: number, unit: EeQuotaUnit): string {
+  return toUnit(seconds, unit).toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
 function bar(usedPercent: number, width = 12): string {
@@ -177,36 +195,67 @@ function bar(usedPercent: number, width = 12): string {
   return "█".repeat(filled) + "░".repeat(width - filled);
 }
 
-function render(report: Report, unit: EeQuotaUnit, showTime = false): string {
-  const percent = report.limitSeconds && report.usedSeconds !== undefined
-    ? Math.max(0, Math.min(100, report.usedSeconds / report.limitSeconds * 100))
-    : undefined;
-  const amount = report.usedSeconds !== undefined && report.limitSeconds !== undefined
-    ? `${displayValue(report.usedSeconds, unit)}/${displayValue(report.limitSeconds, unit)} ${unit}`
-    : "unavailable";
-  const lines = [
-    ...(showTime ? [new Date().toLocaleString("sv-SE", { hour12: false })] : []),
-    percent === undefined ? "  unavailable" : `  ${bar(percent)} ${percent.toFixed(2)}%   ${amount}`,
-  ];
-  for (const warning of report.warnings) lines.push(`  note    ${warning}`);
+function render(reports: Report[], unit: EeQuotaUnit, showTime = false): string {
+  const rows = reports.map((report) => ({
+    report,
+    percent: report.limitSeconds && report.usedSeconds !== undefined
+      ? Math.max(0, Math.min(100, report.usedSeconds / report.limitSeconds * 100))
+      : undefined,
+    used: report.usedSeconds === undefined ? undefined : displayUsed(report.usedSeconds, unit),
+    limit: report.limitSeconds === undefined ? undefined : displayLimit(report.limitSeconds, unit),
+  }));
+  const w = Math.max(0, ...reports.map((report) => report.project.length));
+  const usedW = Math.max(6, ...rows.map((row) => row.used?.length ?? 0));
+  const limitW = Math.max(0, ...rows.map((row) => row.limit?.length ?? 0));
+  const lines = showTime ? [new Date().toLocaleString("sv-SE", { hour12: false })] : [];
+  for (const row of rows) {
+    const amount = row.used !== undefined && row.limit !== undefined
+      ? `${row.used.padStart(usedW)}/${row.limit.padStart(limitW)} ${unit}`
+      : "unavailable";
+    lines.push(row.percent === undefined
+      ? `${row.report.project.padEnd(w)}  unavailable`
+      : `${row.report.project.padEnd(w)}  ${bar(row.percent)} ${row.percent.toFixed(2).padStart(5)}% ${amount}`);
+    for (const warning of row.report.warnings) lines.push(`${"".padEnd(w)}  note    ${warning}`);
+  }
   return lines.join("\n");
+}
+
+function auth(args: string[]): void {
+  const cmd = args[0];
+  if (cmd === "list" || cmd === undefined) {
+    const names = listEeProjects();
+    if (!names.length) {
+      process.stdout.write("ee-quota: no projects. Run `ee-quota auth enable <PROJECT>`\n");
+      return;
+    }
+    const w = Math.max(7, ...names.map((name) => name.length));
+    process.stdout.write(`${"PROJECT".padEnd(w)}  STATUS\n`);
+    for (const name of names) {
+      process.stdout.write(`${name.padEnd(w)}  ${isEeProjectEnabled(name) ? "enabled" : "disabled"}\n`);
+    }
+    process.stdout.write(`\nconfig: ${earthEngineConfigPath()}\n`);
+    return;
+  }
+  if (cmd === "enable" || cmd === "disable") {
+    const name = args[1]?.trim();
+    if (!name) throw new Error(`auth ${cmd} requires a project id`);
+    setEeProjectEnabled(name, cmd === "enable");
+    process.stdout.write(`ee-quota: ${cmd}d ${name}\n`);
+    return;
+  }
+  throw new Error("usage: ee-quota auth list | enable <PROJECT> | disable <PROJECT>");
 }
 
 function config(args: string[]): void {
   if (args[0] === "set") {
     const name = args[1];
     const value = args[2]?.trim();
-    if (name === "project" && value) {
-      setEeQuotaProject(value);
-      process.stdout.write(`ee-quota: project set to ${value}\n`);
-      return;
-    }
     if (name === "unit" && (value === "s" || value === "h")) {
       setEeQuotaUnit(value);
       process.stdout.write(`ee-quota: unit set to ${value}\n`);
       return;
     }
-    throw new Error("usage: ee-quota config set project <ID> | unit <s|h>");
+    throw new Error("usage: ee-quota config set unit <s|h>");
   }
   const i = args.indexOf("--unit");
   if (i >= 0) {
@@ -216,7 +265,7 @@ function config(args: string[]): void {
     process.stdout.write(`ee-quota: unit set to ${unit}\n`);
     return;
   }
-  process.stdout.write(`project: ${getEeQuotaProject() ?? "-"}\nunit: ${getEeQuotaUnit()}\n`);
+  process.stdout.write(`projects: ${enabledEeProjects().join(", ") || "-"}\nunit: ${getEeQuotaUnit()}\n`);
 }
 
 function intervalMs(raw: string): number {
@@ -236,7 +285,11 @@ function parseArgs(args: string[]): Options {
   const out: Options = { noLive: false, watch: false, intervalMs: 60_000, json: false };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
-    if (arg === "--minutes") out.minutes = Number(args[++i]);
+    if (arg === "-p" || arg === "--project") {
+      const raw = args[++i];
+      if (!raw || raw.startsWith("-")) throw new Error("-p requires a project id");
+      out.projects = [...(out.projects ?? []), ...raw.split(",").map((s) => s.trim()).filter(Boolean)];
+    } else if (arg === "--minutes") out.minutes = Number(args[++i]);
     else if (arg === "--unit") {
       const unit = args[++i]?.toLowerCase();
       if (unit !== "s" && unit !== "h") throw new Error("--unit requires s or h");
@@ -274,6 +327,10 @@ async function runWatch(options: Options, unit: EeQuotaUnit): Promise<void> {
 }
 
 export async function handleEeQuotaSubcommand(args: string[]): Promise<void> {
+  if (args[0] === "auth") {
+    auth(args.slice(1));
+    return;
+  }
   if (args[0] === "config") {
     config(args.slice(1));
     return;
@@ -288,13 +345,16 @@ export async function handleEeQuotaSubcommand(args: string[]): Promise<void> {
     await runWatch(options, unit);
     return;
   }
-  const report = await query(options);
+  const reports = await query(options);
   if (options.json) {
-    const percent = report.limitSeconds && report.usedSeconds !== undefined
-      ? report.usedSeconds / report.limitSeconds * 100
-      : undefined;
-    process.stdout.write(`${JSON.stringify({ ...report, unit, usedPercent: percent }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify(reports.map((report) => ({
+      ...report,
+      unit,
+      usedPercent: report.limitSeconds && report.usedSeconds !== undefined
+        ? report.usedSeconds / report.limitSeconds * 100
+        : undefined,
+    })), null, 2)}\n`);
     return;
   }
-  process.stdout.write(`${render(report, unit)}\n`);
+  process.stdout.write(`${render(reports, unit)}\n`);
 }
