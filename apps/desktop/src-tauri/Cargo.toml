@@ -1,7 +1,7 @@
 [package]
 name = "ai-quota-desktop"
 version = "0.1.0"
-description = "Windows tray quota monitor"
+description = "Desktop tray quota monitor"
 authors = ["kongdd"]
 edition = "2021"
 

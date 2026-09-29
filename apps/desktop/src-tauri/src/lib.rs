@@ -11,9 +11,12 @@ const VIRTUAL_PI_AUTH: &str = "/pi/auth.json";
 const VIRTUAL_LEDGER: &str = "/config/ai-quota/api-usage.json";
 
 fn home_dir() -> Result<PathBuf, String> {
-    std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .map(PathBuf::from)
+    let home = if cfg!(windows) {
+        std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))
+    } else {
+        std::env::var_os("HOME")
+    };
+    home.map(PathBuf::from)
         .ok_or("home directory not found".into())
 }
 
@@ -49,8 +52,17 @@ fn append_log_file(path: &Path, message: &str) -> Result<(), String> {
 
 #[tauri::command]
 fn append_log(message: String) -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
-    append_log_file(&exe.with_file_name("log.txt"), &message)
+    #[cfg(target_os = "macos")]
+    let path = {
+        let dir = config_dir(&home_dir()?).join("ai-quota");
+        fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+        dir.join("log.txt")
+    };
+    #[cfg(not(target_os = "macos"))]
+    let path = std::env::current_exe()
+        .map_err(|error| error.to_string())?
+        .with_file_name("log.txt");
+    append_log_file(&path, &message)
 }
 
 #[tauri::command]
@@ -128,7 +140,13 @@ fn read_runtime() -> Result<String, String> {
     }
     serde_json::to_string(&json!({
         "home": "/home/user",
-        "platform": if cfg!(windows) { "win32" } else { "linux" },
+        "platform": if cfg!(windows) {
+            "win32"
+        } else if cfg!(target_os = "macos") {
+            "darwin"
+        } else {
+            "linux"
+        },
         "env": env,
         "files": files,
     }))
@@ -180,6 +198,26 @@ fn write_runtime(writes: String) -> Result<(), String> {
         write_atomic(&path, contents)?;
     }
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn install_autostart() -> Result<(), String> {
+    let path = home_dir()?.join("Library/LaunchAgents/io.github.kongdd.aiquota.desktop.plist");
+    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+    let executable = executable.to_string_lossy()
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;");
+    let plist = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+        <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
+        <plist version=\"1.0\"><dict>\n\
+        <key>Label</key><string>io.github.kongdd.aiquota.desktop</string>\n\
+        <key>ProgramArguments</key><array><string>{executable}</string></array>\n\
+        <key>RunAtLoad</key><true/>\n\
+        </dict></plist>\n");
+    write_atomic(&path, &plist)
 }
 
 fn glyph(character: char) -> [u8; 5] {
@@ -317,6 +355,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_http::init())
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            install_autostart().map_err(std::io::Error::other)?;
             setup_tray(app)?;
             Ok(())
         })
