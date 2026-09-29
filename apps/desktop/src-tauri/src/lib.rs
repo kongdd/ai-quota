@@ -3,6 +3,8 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use tauri::image::Image;
+#[cfg(target_os = "macos")]
+use tauri::menu::ContextMenu;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager};
@@ -204,7 +206,8 @@ fn write_runtime(writes: String) -> Result<(), String> {
 fn install_autostart() -> Result<(), String> {
     let path = home_dir()?.join("Library/LaunchAgents/io.github.kongdd.aiquota.desktop.plist");
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-    let executable = executable.to_string_lossy()
+    let executable = executable
+        .to_string_lossy()
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
@@ -312,6 +315,8 @@ fn hide_window(app: tauri::AppHandle) -> Result<(), String> {
 
 fn show_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
+        #[cfg(target_os = "macos")]
+        let _ = app.show();
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
@@ -324,11 +329,14 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&refresh_all, &settings, &quit])?;
 
-    TrayIconBuilder::with_id("quota")
+    let builder = TrayIconBuilder::with_id("quota")
         .icon(tray_image("--", "idle"))
         .tooltip("AI Quota")
-        .menu(&menu)
-        .show_menu_on_left_click(false)
+        .show_menu_on_left_click(false);
+    // macOS 原生托盘菜单会吞掉鼠标事件，改为右键时弹出。
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.menu(&menu);
+    builder
         .on_menu_event(|app, event| match event.id().0.as_str() {
             "refresh-all" => {
                 let _ = app.emit("tray-refresh-all", ());
@@ -337,14 +345,57 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
             "quit" => app.exit(0),
             _ => {}
         })
-        .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = event
-            {
-                show_window(tray.app_handle());
+        .on_tray_icon_event({
+            #[cfg(target_os = "macos")]
+            let last_click = std::sync::Mutex::new(None::<std::time::Instant>);
+            move |tray, event| {
+                #[cfg(target_os = "macos")]
+                if let TrayIconEvent::Click {
+                    button,
+                    button_state: MouseButtonState::Down,
+                    ..
+                } = event
+                {
+                    match button {
+                        MouseButton::Right => {
+                            if let Some(window) = tray.app_handle().get_webview_window("main") {
+                                let _ = menu.popup(window.as_ref().window());
+                            }
+                        }
+                        MouseButton::Left => {
+                            let mut last = last_click.lock().unwrap();
+                            let now = std::time::Instant::now();
+                            if last.replace(now).is_some_and(|time| {
+                                now.duration_since(time) <= std::time::Duration::from_millis(800)
+                            }) {
+                                *last = None;
+                                show_window(tray.app_handle());
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                #[cfg(windows)]
+                if matches!(
+                    event,
+                    TrayIconEvent::DoubleClick {
+                        button: MouseButton::Left,
+                        ..
+                    }
+                ) {
+                    show_window(tray.app_handle());
+                }
+                #[cfg(not(any(windows, target_os = "macos")))]
+                if matches!(
+                    event,
+                    TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    }
+                ) {
+                    show_window(tray.app_handle());
+                }
             }
         })
         .build(app)?;
