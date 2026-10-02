@@ -18,7 +18,7 @@
 - [x] Kimi coding plan    : **待测试**，`KIMI_API_KEY` or `MOONSHOT_API_KEY` env
 - [x] Zhipu coding plan   : **待测试**，`ZHIPU_CN_API_KEY` or `ZHIPU_API_KEY` env (cn/intl regions)
 
-Pi 新版 `/login openai` 使用的订阅共享额度，在 `openai·apps` 行显示，与普通 Codex 额度分开。数据来自 WHAM 的 `chatpass.windows`；按服务端窗口显示 5 小时、周额度，不补造缺失窗口。这是账号共享池，不代表 Pi 单独设置的应用上限。
+Pi 新版 `/login openai` 的应用额度显示为 `openai·apps`，与普通 Codex 额度分开。使用 Codex 凭据查询 `/wham/usage/chatpass/apps`，按新版 token 的 `client_id` 唯一匹配当前应用，显示 5 小时和周窗口；不以配置上限或其他应用额度代替。两种登录须对应同一 ChatGPT 账号/工作区。
 
 查询仍需 pi `openai-codex`（legacy）或 Codex 凭据：新版 `openai` token 面向 `api.openai.com/v1`，实测无法读取 WHAM。仅有新版凭据时提示查看 [ChatGPT Usage](https://chatgpt.com/settings/usage)。不刷新或改写共享凭据。详见 [接口核查](docs/openai-auth.md)。
 

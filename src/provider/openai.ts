@@ -34,6 +34,7 @@ export interface CodexToken {
 
 interface WhamWindow {
   used_percent: number;
+  remaining_percent?: number;
   limit_window_seconds: number;
   reset_after_seconds: number;
   reset_at: number;
@@ -44,6 +45,7 @@ interface WhamResponse {
   account_id?: string;
   email?: string;
   plan_type?: string;
+  /** 可选的共享池；当前 Pi 应用额度需另查 /usage/chatpass/apps。 */
   chatpass?: { windows?: WhamWindow[] };
   rate_limit?: {
     allowed?: boolean;
@@ -93,6 +95,32 @@ function loadCodexTokenFromPiAuth(authPath = piAgentAuthPath()): CodexToken | un
   const accountId = typeof idRaw === "string" ? idRaw.trim() : "";
   if (accountId) token.accountId = accountId;
   return token;
+}
+
+/** 新版 Pi OAuth 仅提供本地应用匹配信息，绝不发送到 ChatGPT 后端。 */
+function loadOpenaiClientId(): string | undefined {
+  const entry = readPiAuthEntry("openai");
+  if (entry?.type !== "oauth") return undefined;
+  const raw = entry.access ?? entry.access_token ?? entry.token;
+  if (typeof raw !== "string") return undefined;
+  try {
+    const parts = raw.trim().split(".");
+    if (parts.length !== 3 || !parts[1]) return undefined;
+    const claims = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"))) as {
+      iss?: string;
+      aud?: string;
+      scope?: string;
+      client_id?: string;
+    };
+    if (
+      claims.iss !== "https://auth.openai.com" || claims.aud !== "https://api.openai.com/v1"
+      || typeof claims.scope !== "string" || !claims.scope.split(/\s+/).includes("chatgpt.tokens.use.direct")
+      || typeof claims.client_id !== "string" || !/^oaiapp_[a-zA-Z0-9_-]+$/.test(claims.client_id)
+    ) return undefined;
+    return claims.client_id;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -197,9 +225,10 @@ export async function queryResetCredits(
 /** WHAM 的 reset_at 是 epoch 秒；不存在的窗口不补造额度。 */
 function whamWindowQuota(window?: WhamWindow): IntervalQuota | undefined {
   if (!window || !Number.isFinite(window.used_percent) || !Number.isFinite(window.reset_at)) return undefined;
+  if (window.remaining_percent !== undefined && !Number.isFinite(window.remaining_percent)) return undefined;
   const endTime = window.reset_at * 1000;
   return {
-    remaining_percent: Math.max(0, Math.min(100, 100 - window.used_percent)),
+    remaining_percent: Math.max(0, Math.min(100, window.remaining_percent ?? 100 - window.used_percent)),
     remains_time: Math.max(0, endTime - Date.now()),
     end_time: endTime,
     status: window.used_percent >= 100 ? 3 : 1,
@@ -219,7 +248,8 @@ function whamToModelRemain(
 
 /**
  * 拉 ChatGPT 后端的配额数据：`GET https://chatgpt.com/backend-api/wham/usage`。
- * 一次 HTTP GET、零消耗、零副作用。Codex CLI 主调用走的是 wss 协议，但 quota 走这个独立端点。
+ * 有新版 Pi OAuth 时另查 `/usage/chatpass/apps`，按 client_id 唯一匹配当前应用。
+ * 仅只读 GET、零推理消耗；不会刷新或改写共享凭据。
  * 需要 ChatGPT OAuth JWT + Codex-style headers 才能通过后端鉴权。
  */
 export async function queryQuota(
@@ -234,6 +264,7 @@ export async function queryQuota(
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   const headers = { ...buildCodexHeaders(token), "OAI-App-Brand": "chatgpt" };
+  const clientId = loadOpenaiClientId();
   let lastErr: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const ctrl = new AbortController();
@@ -254,13 +285,32 @@ export async function queryQuota(
       const modelName = data.plan_type ? `codex · ${data.plan_type === "prolite" ? "pro" : data.plan_type}` : "codex";
       const primary = data.rate_limit?.primary_window;
       const codex = whamToModelRemain(modelName, primary, data.rate_limit?.secondary_window ?? primary);
-      const windows = Array.isArray(data.chatpass?.windows) ? data.chatpass.windows : [];
-      // ponytail: 支持当前 5h / 周共享额度；出现其他周期时扩展窗口映射。
+      let windows = Array.isArray(data.chatpass?.windows) ? data.chatpass.windows : [];
+      if (clientId) {
+        const appResp = await fetchQuota(`${url}/chatpass/apps`, {
+          headers,
+          signal: ctrl.signal,
+          redirect: "error",
+        });
+        if (!appResp.ok) {
+          throw new CodexAuthError(`OpenAI apps usage HTTP ${appResp.status}`, appResp.status === 429 || appResp.status >= 500);
+        }
+        const appData = await appResp.json() as {
+          items?: Array<{ id?: string; windows?: WhamWindow[] }>;
+        } | null;
+        const matches = Array.isArray(appData?.items) ? appData.items.filter((app) => app?.id === clientId) : [];
+        if (matches.length !== 1) {
+          throw new CodexAuthError("OpenAI app not uniquely found; sign in to Pi OpenAI and Codex with the same ChatGPT account/workspace", false);
+        }
+        windows = Array.isArray(matches[0]?.windows) ? matches[0].windows : [];
+      }
+      // ponytail: 支持当前 5h / 周额度；出现其他周期时扩展窗口映射。
       const apps = whamToModelRemain(
         "openai · apps",
         windows.find((w) => w?.limit_window_seconds === 5 * 60 * 60),
         windows.find((w) => w?.limit_window_seconds === 7 * 24 * 60 * 60),
       );
+      if (clientId && !apps) throw new CodexAuthError("OpenAI app usage has no supported quota windows", false);
       const models = [codex, apps].filter((m): m is ModelRemain => m !== null);
       if (!models.length) throw new CodexAuthError("quota windows missing in response", false);
       return {

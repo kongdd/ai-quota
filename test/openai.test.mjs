@@ -81,6 +81,7 @@ test("ChatPass shared-app quotas use duration, preserve missing windows, and ren
   const short = { used_percent: 9, limit_window_seconds: 18_000, reset_at: 2_000_000_000 };
   const weekly = { used_percent: 2, limit_window_seconds: 604_800, reset_at: 2_000_600_000 };
   for (const scenario of [
+    {}, // 真实 WHAM 响应可完全缺少 chatpass，不能补造共享额度。
     { windows: [weekly, short], shortLeft: 91, weekLeft: 98 },
     { windows: [weekly], weekLeft: 98 },
     { windows: [short], shortLeft: 91 },
@@ -97,7 +98,7 @@ test("ChatPass shared-app quotas use duration, preserve missing windows, and ren
         return Response.json({
           plan_type: "plus",
           rate_limit: { primary_window: { ...short, used_percent: 20 } },
-          chatpass: { windows: scenario.windows },
+          ...(scenario.windows === undefined ? {} : { chatpass: { windows: scenario.windows } }),
         });
       },
     });
@@ -110,6 +111,7 @@ test("ChatPass shared-app quotas use duration, preserve missing windows, and ren
       assert.equal(codexModel.windows.weekly.remainingPercent, 80);
       if (scenario.shortLeft === undefined && scenario.weekLeft === undefined) {
         assert.equal(apps, undefined);
+        assert.equal(result.providers[0].models.length, 1);
         continue;
       }
       assert.equal(apps.name, "openai · apps");
