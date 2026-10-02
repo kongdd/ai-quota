@@ -10,13 +10,17 @@
 ## ai-quota
 
 - [x] Claude code         : `~/.claude/.credentials.json`
-- [x] OpenAI Codex        : `~/.codex/auth.json`
+- [x] OpenAI Codex        : pi `openai-codex`（legacy）或 `~/.codex/auth.json`
 - [x] Grok build          : `~/.pi/agent/auth.json`
 - [x] Opencode go         : `~/.config/ai-quota/opencode.env`
 - [x] Minimax coding plan : `MINIMAX_CN_API_KEY` or `MINIMAX_API_KEY` env
 - [x] DeepSeek API        : `DEEPSEEK_API_KEY`
 - [x] Kimi coding plan    : **待测试**，`KIMI_API_KEY` or `MOONSHOT_API_KEY` env
 - [x] Zhipu coding plan   : **待测试**，`ZHIPU_CN_API_KEY` or `ZHIPU_API_KEY` env (cn/intl regions)
+
+Pi 新版 `/login openai` 使用的订阅共享额度，在 `openai·apps` 行显示，与普通 Codex 额度分开。数据来自 WHAM 的 `chatpass.windows`；按服务端窗口显示 5 小时、周额度，不补造缺失窗口。这是账号共享池，不代表 Pi 单独设置的应用上限。
+
+查询仍需 pi `openai-codex`（legacy）或 Codex 凭据：新版 `openai` token 面向 `api.openai.com/v1`，实测无法读取 WHAM。仅有新版凭据时提示查看 [ChatGPT Usage](https://chatgpt.com/settings/usage)。不刷新或改写共享凭据。详见 [接口核查](docs/openai-auth.md)。
 
 **Usage**
 

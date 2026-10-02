@@ -33,10 +33,14 @@ function piAuthHasAny(keys: readonly string[]): boolean {
 }
 
 /** 缺省启用规则：未在 cfg 显式声明时按 pi auth.json 实际授权情况判定。
- *  - plan：默认禁用
+ *  - OpenAI 同时识别新版 openai OAuth（不把 API key 当作订阅授权）
  *  - 有 PI_AUTH_PROVIDER_KEYS 映射的 provider：按 pi auth.json 是否存在任一 key 决定
  *  - 其余 provider（凭据来源不在 pi auth.json）：默认禁用 */
 export function defaultEnabled(name: string): boolean {
+  if (name === "openai") {
+    const entry = readPiAuthEntry("openai");
+    if (entry?.type === "oauth" && typeof entry.access === "string" && entry.access.trim()) return true;
+  }
   const piKeys = PI_AUTH_PROVIDER_KEYS[name as KnownProvider];
   if (piKeys) return piAuthHasAny(piKeys);
   return false;
@@ -79,9 +83,10 @@ export function normalizeName(raw: string): KnownItem | undefined {
   return KNOWN_ITEMS.find((k) => k.toLowerCase() === lower);
 }
 
-/** pi agent 默认 auth.json 路径：`$PI_CONFIG_DIR/auth.json` 或 `~/.pi/agent/auth.json`。 */
+/** pi agent auth.json：优先 PI_CODING_AGENT_DIR，兼容 PI_CONFIG_DIR，默认 ~/.pi/agent。 */
 export function piAgentAuthPath(): string {
-  if (env.PI_CONFIG_DIR) return join(env.PI_CONFIG_DIR, "auth.json");
+  const dir = env.PI_CODING_AGENT_DIR ?? env.PI_CONFIG_DIR;
+  if (dir) return join(dir, "auth.json");
   return join(homedir(), ".pi", "agent", "auth.json");
 }
 
@@ -107,10 +112,10 @@ function windowsHomes(): string[] {
   return homes;
 }
 
-/** 本机 auth.json，以及 WSL 下 Windows 用户的同名文件。显式路径 / PI_CONFIG_DIR 不追加。 */
+/** 本机 auth.json，以及 WSL 下 Windows 用户的同名文件。显式路径 / 配置目录不追加。 */
 export function piAuthCandidatePaths(primary = piAgentAuthPath()): string[] {
   const paths = [primary];
-  if (env.PI_CONFIG_DIR || primary !== piAgentAuthPath()) return paths;
+  if (env.PI_CODING_AGENT_DIR || env.PI_CONFIG_DIR || primary !== piAgentAuthPath()) return paths;
   for (const home of windowsHomes()) {
     const p = join(home, ".pi", "agent", "auth.json");
     if (p !== primary && existsSync(p)) paths.push(p);

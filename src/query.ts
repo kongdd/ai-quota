@@ -194,7 +194,7 @@ export async function runQuotaQuery(
   });
 }
 
-function windowSnapshot(window: ModelRemain["interval"], now: number): QuotaWindowSnapshot {
+function windowSnapshot(window: NonNullable<ModelRemain["interval"]>, now: number): QuotaWindowSnapshot {
   const remainingPercent = Math.max(0, Math.min(100, window.remaining_percent));
   return {
     remainingPercent,
@@ -216,10 +216,9 @@ function modelPeriods(provider: Provider, model: ModelRemain, values: QueryValue
 
 function modelSnapshot(model: ModelRemain, provider: Provider, now: number, values: QueryValues): QuotaModelSnapshot {
   const periods = modelPeriods(provider, model, values);
-  const windows: Partial<Record<QuotaPeriod, QuotaWindowSnapshot>> = {
-    [periods.interval]: windowSnapshot(model.interval, now),
-    [periods.weekly]: windowSnapshot(model.weekly, now),
-  };
+  const windows: Partial<Record<QuotaPeriod, QuotaWindowSnapshot>> = {};
+  if (model.interval) windows[periods.interval] = windowSnapshot(model.interval, now);
+  if (model.weekly) windows[periods.weekly] = windowSnapshot(model.weekly, now);
   if (model.monthly) windows[periods.monthly] = windowSnapshot(model.monthly, now);
 
   const snapshot: QuotaModelSnapshot = {

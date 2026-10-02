@@ -1,6 +1,6 @@
 import { piAgentAuthPath, readJsonFile, readPiAuthEntry } from "../auth.js";
-import { env, fetchQuota, homedir, join, randomUUID } from "../platform.js";
-import type { ModelRemain, QuotaResponse } from "./minimax.js";
+import { env, existsSync, fetchQuota, homedir, join, randomUUID } from "../platform.js";
+import type { IntervalQuota, ModelRemain, QuotaResponse } from "./minimax.js";
 
 export class CodexAuthError extends Error {
   constructor(message: string, public retryable = true) {
@@ -44,6 +44,7 @@ interface WhamResponse {
   account_id?: string;
   email?: string;
   plan_type?: string;
+  chatpass?: { windows?: WhamWindow[] };
   rate_limit?: {
     allowed?: boolean;
     limit_reached?: boolean;
@@ -82,9 +83,9 @@ function defaultAuthPath(): string {
 
 /** 从 pi agent auth.json 的 `openai-codex` 条目读 Codex OAuth token（access + accountId）。 */
 function loadCodexTokenFromPiAuth(authPath = piAgentAuthPath()): CodexToken | undefined {
-  const e = readPiAuthEntry("openai-codex", authPath) ?? readPiAuthEntry("openai", authPath);
-  if (!e) return undefined;
-  const raw = e.access ?? e.key ?? e.access_token ?? e.token;
+  const e = readPiAuthEntry("openai-codex", authPath);
+  if (!e || (e.type !== undefined && e.type !== "oauth")) return undefined;
+  const raw = e.access ?? e.access_token ?? e.token;
   const accessToken = typeof raw === "string" ? raw.trim() : "";
   if (!accessToken) return undefined;
   const token: CodexToken = { accessToken };
@@ -97,12 +98,22 @@ function loadCodexTokenFromPiAuth(authPath = piAgentAuthPath()): CodexToken | un
 /**
  * 从 Codex CLI 持久化的 auth.json 读出 ChatGPT OAuth JWT。
  * 优先 pi agent auth.json 的 `openai-codex` 条目，再回退到 `$CODEX_HOME/auth.json`（ChatGPT 模式）；
+ * 新版 pi `openai` OAuth 面向 api.openai.com，不能用于 WHAM；仅有新版凭据时给出明确提示。
  * 缺失 tokens 时报错（API key 模式不返回 quota 窗口结构，跳过）。
  */
 export function loadCodexToken(authPath = defaultAuthPath()): CodexToken {
-  // 主路径：pi agent 共享的 OAuth 条目（无 refresh_token，刷新交由 pi 自己）
+  // 旧版 OAuth 的刷新仍交由 pi / Codex 管理；不修改共享凭据。
   const fromPi = loadCodexTokenFromPiAuth();
   if (fromPi) return fromPi;
+
+  if (!existsSync(authPath) && readPiAuthEntry("openai")?.type === "oauth") {
+    throw new CodexAuthError(
+      "Pi OpenAI (Sign in with ChatGPT) OAuth cannot read ChatGPT usage; "
+      + "sign in with Codex / pi OpenAI Codex (legacy) for Codex and shared-app quota, "
+      + "or see https://chatgpt.com/settings/usage",
+      false,
+    );
+  }
 
   let parsed: AuthDotJson;
   try {
@@ -183,33 +194,27 @@ export async function queryResetCredits(
   }
 }
 
-/** 把 wham/usage 响应里的窗口数据归一化到内部 ModelRemain（5h / week） */
-function whamToModelRemain(w: WhamResponse, modelName: string): ModelRemain | null {
-  const rl = w.rate_limit;
-  if (!rl?.primary_window) return null;
-  const primary = rl.primary_window;
-  const secondary = rl.secondary_window;
-
-  const nowMs = Date.now();
-  // wham 响应的 reset_at 是 epoch **秒**
-  const primaryEndMs = primary.reset_at * 1000;
-  const secondaryEndMs = (secondary?.reset_at ?? primary.reset_at) * 1000;
-
+/** WHAM 的 reset_at 是 epoch 秒；不存在的窗口不补造额度。 */
+function whamWindowQuota(window?: WhamWindow): IntervalQuota | undefined {
+  if (!window || !Number.isFinite(window.used_percent) || !Number.isFinite(window.reset_at)) return undefined;
+  const endTime = window.reset_at * 1000;
   return {
-    model_name: modelName,
-    interval: {
-      remaining_percent: Math.max(0, 100 - primary.used_percent),
-      remains_time: Math.max(0, primaryEndMs - nowMs),
-      end_time: primaryEndMs,
-      status: primary.used_percent >= 100 ? 3 : 1,
-    },
-    weekly: {
-      remaining_percent: Math.max(0, 100 - (secondary?.used_percent ?? primary.used_percent)),
-      remains_time: Math.max(0, secondaryEndMs - nowMs),
-      end_time: secondaryEndMs,
-      status: (secondary?.used_percent ?? primary.used_percent) >= 100 ? 3 : 1,
-    },
+    remaining_percent: Math.max(0, Math.min(100, 100 - window.used_percent)),
+    remains_time: Math.max(0, endTime - Date.now()),
+    end_time: endTime,
+    status: window.used_percent >= 100 ? 3 : 1,
   };
+}
+
+function whamToModelRemain(
+  name: string,
+  primary?: WhamWindow,
+  secondary?: WhamWindow,
+): ModelRemain | null {
+  const interval = whamWindowQuota(primary);
+  const weekly = whamWindowQuota(secondary);
+  if (!interval && !weekly) return null;
+  return { model_name: name, ...(interval && { interval }), ...(weekly && { weekly }) };
 }
 
 /**
@@ -228,7 +233,7 @@ export async function queryQuota(
   // undici 的 connect timeout 是 10s 硬编码；用 retry 容忍 Cloudflare 偶发 connect timeout
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-  const headers = buildCodexHeaders(token);
+  const headers = { ...buildCodexHeaders(token), "OAI-App-Brand": "chatgpt" };
   let lastErr: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const ctrl = new AbortController();
@@ -247,13 +252,20 @@ export async function queryQuota(
       }
       const data = (await resp.json()) as WhamResponse;
       const modelName = data.plan_type ? `codex · ${data.plan_type === "prolite" ? "pro" : data.plan_type}` : "codex";
-      const modelRemain = whamToModelRemain(data, modelName);
-      if (!modelRemain) {
-        throw new CodexAuthError("rate_limit.primary_window missing in response", false);
-      }
+      const primary = data.rate_limit?.primary_window;
+      const codex = whamToModelRemain(modelName, primary, data.rate_limit?.secondary_window ?? primary);
+      const windows = Array.isArray(data.chatpass?.windows) ? data.chatpass.windows : [];
+      // ponytail: 支持当前 5h / 周共享额度；出现其他周期时扩展窗口映射。
+      const apps = whamToModelRemain(
+        "openai · apps",
+        windows.find((w) => w?.limit_window_seconds === 5 * 60 * 60),
+        windows.find((w) => w?.limit_window_seconds === 7 * 24 * 60 * 60),
+      );
+      const models = [codex, apps].filter((m): m is ModelRemain => m !== null);
+      if (!models.length) throw new CodexAuthError("quota windows missing in response", false);
       return {
         base_resp: { status_code: 0, status_msg: "ok" },
-        model_remains: [modelRemain],
+        model_remains: models,
       };
     } catch (e) {
       lastErr = e;

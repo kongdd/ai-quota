@@ -36,17 +36,16 @@ function colorFor(remaining: number) {
 }
 
 interface Col {
-  get: (m: ModelRemain) => { remaining: number; endTime: number };
+  get: (m: ModelRemain) => { remaining: number; endTime: number } | undefined;
 }
 
 const COLS_TWO: Col[] = [
-  { get: (m) => ({ remaining: m.interval.remaining_percent, endTime: m.interval.end_time }) },
-  { get: (m) => ({ remaining: m.weekly.remaining_percent, endTime: m.weekly.end_time }) },
+  { get: (m) => m.interval && ({ remaining: m.interval.remaining_percent, endTime: m.interval.end_time }) },
+  { get: (m) => m.weekly && ({ remaining: m.weekly.remaining_percent, endTime: m.weekly.end_time }) },
 ];
 
 const COLS_OPENCODE_THREE: Col[] = [
-  { get: (m) => ({ remaining: m.interval.remaining_percent, endTime: m.interval.end_time }) },
-  { get: (m) => ({ remaining: m.weekly.remaining_percent, endTime: m.weekly.end_time }) },
+  ...COLS_TWO,
   {
     get: (m) => ({
       remaining: m.monthly?.remaining_percent ?? 0,
@@ -75,7 +74,7 @@ export function displayName(name: string): string {
 function modelRank(name: string): number {
   const shown = displayName(name);
   if (shown.startsWith("claude")) return 0;
-  if (shown.startsWith("codex")) return 1;
+  if (shown.startsWith("codex") || shown.startsWith("openai")) return 1;
   if (shown.startsWith("grok")) return 2;
   if (shown.startsWith("opencode")) return 3;
   if (shown.startsWith("minimax")) return 4;
@@ -99,7 +98,9 @@ function renderCell(
   pctWidth: number,
   barWidth = 10,
 ): string {
-  const { remaining, endTime } = col.get(m);
+  const value = col.get(m);
+  if (!value) return "";
+  const { remaining, endTime } = value;
   const { bar, pct, dur } = cellBody(remaining, endTime, now, barWidth, pctWidth);
   return `${bar} ${pct} ${padVisibleStart(dur, durWidth)}`;
 }
@@ -137,7 +138,10 @@ export function renderReport(
   const pctWidth = Math.max(
     3,
     ...sorted.flatMap((m) =>
-      colsForModel(m).map((col) => `${(100 - col.get(m).remaining).toFixed(0)}%`.length),
+      colsForModel(m).map((col) => {
+        const value = col.get(m);
+        return value ? `${(100 - value.remaining).toFixed(0)}%`.length : 0;
+      }),
     ),
   );
 
@@ -151,8 +155,8 @@ export function renderReport(
     Math.max(
       ...sorted.map((m) => {
         const cols = colsForModel(m);
-        const col = cols[i];
-        return col ? fmtDuration(col.get(m).endTime - now).length : 0;
+        const value = cols[i]?.get(m);
+        return value ? fmtDuration(value.endTime - now).length : 0;
       }),
     ),
   );
@@ -196,9 +200,9 @@ function renderReportCompact(
     lines.push(displayName(m.model_name));
     const cols = colsForModel(m);
     for (let i = 0; i < cols.length; i++) {
-      const col = cols[i];
-      if (!col) continue;
-      const { remaining, endTime } = col.get(m);
+      const value = cols[i]?.get(m);
+      if (!value) continue;
+      const { remaining, endTime } = value;
       const { bar, pct, dur } = cellBody(remaining, endTime, now, 8, pctWidth);
       lines.push(`  ${labels[i]!.padEnd(3)} ${bar} ${pct}  ${dur}`);
     }
