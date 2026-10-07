@@ -95,14 +95,14 @@ async function runMinimax(values: QueryValues): Promise<ModelRemain[]> {
 }
 
 async function runOpenai(values: QueryValues): Promise<ModelRemain[]> {
-  return (await queryOpenai(loadCodexToken(values["codex-auth"] as string | undefined), {
+  return (await queryOpenai(loadCodexToken(), {
     timeoutMs: timeoutMs(values),
     retries: retries(values),
   })).model_remains;
 }
 
 async function runClaude(values: QueryValues): Promise<ModelRemain[]> {
-  return (await queryClaude(loadClaudeToken(values["claude-auth"] as string | undefined), {
+  return (await queryClaude(loadClaudeToken(), {
     timeoutMs: timeoutMs(values),
     retries: retries(values),
   })).model_remains;
@@ -130,7 +130,7 @@ async function runDeepseek(values: QueryValues): Promise<ModelRemain[]> {
     weeklyBudget: (values["deepseek-weekly-budget"] ?? values["weekly-budget"]) as string | undefined,
     monthlyBudget: (values["deepseek-monthly-budget"] ?? values["monthly-budget"]) as string | undefined,
     resetToday: values["reset-today"] === true || values.reset === true,
-    configPath: ((values["deepseek-config"] ?? values.config) as string | undefined) ?? defaultStatePath(),
+    configPath: (values.config as string | undefined) ?? defaultStatePath(),
   })).modelRemains;
 }
 

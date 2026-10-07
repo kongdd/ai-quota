@@ -56,9 +56,7 @@ Options:
                                  Also: -p openai claude  or  -p openai -p claude  (default: enabled ones; first run auto-detects from ~/.pi/agent/auth.json)
       --long [1w|1m]               OpenCode Go: omit value → 5h+1w+1m columns; 1w|1m → second column (else config)
   -r, --region <cn|intl>           MiniMax endpoint (default: cn)
-      --codex-auth <PATH>          Codex auth.json path (default: \$CODEX_HOME/auth.json or ~/.codex/auth.json)
-      --claude-auth <PATH>         Claude credentials path (default: \$CLAUDE_CONFIG_DIR/.credentials.json or ~/.claude/.credentials.json)
-      --deepseek-config, --config <PATH> DeepSeek budget state file (default: ~/.config/ai-quota/api-usage.json)
+      --config <PATH>              DeepSeek budget state file (default: ~/.config/ai-quota/api-usage.json)
       --reset-today, --reset       Reset DeepSeek daily + weekly baselines
   -w, --watch                      Refresh in place until Ctrl+C (implied by --interval)
   -i, --interval <SECS>            Watch refresh interval (accepts 30, 30s, 1m; default 60). Implies --watch.
@@ -104,7 +102,7 @@ Config file: ${aiQuotaConfigPath()}
 One-off: ai-quota -p opencode --long 1w | ai-quota -p opencode --long (three columns)
 `;
 
-const QUERY_HELP = `Usage: ai-quota query reset-card -p codex [--codex-auth <PATH>]
+const QUERY_HELP = `Usage: ai-quota query reset-card -p codex
 `;
 
 function die(msg: string): never {
@@ -256,7 +254,6 @@ async function handleQuerySubcommand(args: string[]): Promise<void> {
       args: args.slice(1),
       options: {
         provider: { type: "string", short: "p" },
-        "codex-auth": { type: "string" },
       },
     }) as { values: Record<string, unknown> });
   } catch (e) {
@@ -265,7 +262,7 @@ async function handleQuerySubcommand(args: string[]): Promise<void> {
   if (values.provider !== "codex") die("query reset-card requires `-p codex`");
 
   try {
-    const token = loadCodexToken(values["codex-auth"] as string | undefined);
+    const token = loadCodexToken();
     process.stdout.write(`${renderResetCredits(await queryResetCredits(token))}\n`);
   } catch (e) {
     die(formatError(e));
@@ -424,12 +421,9 @@ async function main(): Promise<void> {
         "zhipu-region": { type: "string" },
         "zhipu-org": { type: "string" },
         "zhipu-project": { type: "string" },
-        "codex-auth": { type: "string" },
-        "claude-auth": { type: "string" },
         "deepseek-daily-budget": { type: "string" },
         "deepseek-weekly-budget": { type: "string" },
         "deepseek-monthly-budget": { type: "string" },
-        "deepseek-config": { type: "string" },
         budget: { type: "string" },
         "weekly-budget": { type: "string" },
         "monthly-budget": { type: "string" },
