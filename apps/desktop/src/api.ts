@@ -1,94 +1,56 @@
 import { invoke } from "@tauri-apps/api/core";
-import { fetch as httpFetch } from "@tauri-apps/plugin-http";
-import { queryBrowserQuota } from "../../../src/browser";
-import {
-  DESKTOP_QUERY_VALUES,
-  proxyFrom,
-  proxyLabel,
-  requestLabel,
-} from "./network";
 import type { Provider, QuotaSnapshot } from "./types";
 
-interface RuntimeSnapshot {
-  home: string;
-  platform: string;
-  env: Record<string, string>;
-  files: Record<string, string>;
+export interface Config {
+  target: string;
+  refreshSeconds: number;
+  refreshLimit: number;
+  quietStart: number;
+  quietEnd: number;
+  paused: boolean;
 }
 
-const QUERY_TIMEOUT_MS = 35_000;
-let queue = Promise.resolve();
+export interface MonitorState {
+  config: Config;
+  snapshot: QuotaSnapshot | null;
+  autoLeft: number;
+  error: string;
+  silent: boolean;
+  revision: number;
+}
 
-const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
-const appendLog = async (message: string) => {
-  try {
-    await invoke("append_log", { message: `${new Date().toISOString()} ${message}` });
-  } catch (error) {
-    console.error("write log.txt failed", error);
-  }
+const DEFAULT_CONFIG: Config = {
+  target: "", refreshSeconds: 120, refreshLimit: 30, quietStart: 23, quietEnd: 8, paused: false,
 };
 
-export function queryQuota(providers?: Provider[]): Promise<QuotaSnapshot> {
-  const run = queue.then(async () => {
-    await appendLog(`=== query start providers=${providers?.join(",") ?? "enabled"} ===`);
-    try {
-      const runtime = JSON.parse(await invoke<string>("read_runtime")) as RuntimeSnapshot;
-      const controller = new AbortController();
-      const proxy = proxyFrom(runtime.env);
-      await appendLog(`runtime platform=${runtime.platform} files=${Object.keys(runtime.files).join(",") || "none"} proxy=${proxyLabel(proxy)}`);
-
-      const fetch: typeof globalThis.fetch = async (input, init) => {
-        const label = requestLabel(input, init?.method);
-        const started = performance.now();
-        await appendLog(`request start ${label}`);
-        try {
-          const response = await httpFetch(input, {
-            ...init,
-            signal: init?.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal,
-            connectTimeout: 10_000,
-            ...(proxy ? { proxy } : {}),
-          });
-          await appendLog(`request done ${label} status=${response.status} elapsed=${Math.round(performance.now() - started)}ms`);
-          return response;
-        } catch (error) {
-          await appendLog(`request failed ${label} elapsed=${Math.round(performance.now() - started)}ms error=${errorMessage(error)}`);
-          throw error;
-        }
-      };
-
-      const query = queryBrowserQuota({
-        ...runtime,
-        providers,
-        fetch,
-        values: DESKTOP_QUERY_VALUES,
-      });
-      let timer: ReturnType<typeof setTimeout>;
-      const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          controller.abort();
-          reject(new Error("查询超时（35 秒）"));
-        }, QUERY_TIMEOUT_MS);
-      });
-      try {
-        const result = await Promise.race([query, timeout]);
-        if (!result.snapshot.providers.length) throw new Error("未找到可用凭据");
-        const summary = result.snapshot.providers.map((provider) => provider.status === "ok"
-          ? `${provider.provider}=ok`
-          : `${provider.provider}=error(${provider.error.code}: ${provider.error.message})`).join("; ");
-        await appendLog(`query done status=${result.snapshot.status} providers=${summary}`);
-        if (Object.keys(result.writes).length) {
-          await invoke("write_runtime", { writes: JSON.stringify(result.writes) });
-          await appendLog(`state written files=${Object.keys(result.writes).join(",")}`);
-        }
-        return result.snapshot;
-      } finally {
-        clearTimeout(timer!);
-      }
-    } catch (error) {
-      await appendLog(`query failed error=${errorMessage(error)}`);
-      throw error;
-    }
-  });
-  queue = run.then(() => undefined, () => undefined);
-  return run;
+function count(value: unknown, fallback: number, max = Number.MAX_SAFE_INTEGER) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 1 ? Math.min(max, Math.floor(n)) : fallback;
 }
+
+function hour(value: unknown, fallback: number) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.min(23, Math.max(0, Math.floor(n))) : fallback;
+}
+
+/** 仅用于首次迁移。Rust 接管后前端会删掉这条 localStorage。 */
+export function loadConfig(): Config {
+  try {
+    const saved = JSON.parse(localStorage.getItem("ai-quota.desktop") ?? "{}") as Partial<Config>;
+    return {
+      target: typeof saved.target === "string" ? saved.target : "",
+      refreshSeconds: count(saved.refreshSeconds, 120, 86400),
+      refreshLimit: count(saved.refreshLimit, 30),
+      quietStart: hour(saved.quietStart, 23),
+      quietEnd: hour(saved.quietEnd, 8),
+      paused: saved.paused === true,
+    };
+  } catch {
+    return { ...DEFAULT_CONFIG };
+  }
+}
+
+export const startMonitor = (config: Config) => invoke<MonitorState>("start_monitor", { config });
+export const getMonitor = () => invoke<MonitorState>("get_monitor");
+export const configureMonitor = (config: Config) => invoke<MonitorState>("configure_monitor", { config });
+export const queryQuota = (provider?: Provider) => invoke<MonitorState>("refresh_monitor", { provider });

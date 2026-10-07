@@ -30,6 +30,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "externalBin": ["binaries/ai-quota-worker"],
     "icon": ["icons/icon.ico", "icons/icon.icns", "icons/icon.png"]
   }
 }

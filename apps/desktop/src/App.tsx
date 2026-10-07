@@ -1,19 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { queryQuota } from "./api";
-import { mergeProvider, PROVIDERS, type Provider, type ProviderSnapshot, type QuotaPeriod, type QuotaWindow } from "./types";
+import { configureMonitor, getMonitor, loadConfig, queryQuota, startMonitor, type Config, type MonitorState } from "./api";
+import { LABELS, PERIOD_SHORT, targetId, targetsOf, tone, used, visibleModels, visibleWindows } from "./display";
+import { PROVIDERS, type Provider, type ProviderSnapshot } from "./types";
 
-const LABELS: Record<Provider, string> = {
-  minimax: "MiniMax",
-  openai: "OpenAI",
-  claude: "Claude",
-  opencode: "OpenCode Go",
-  "deepseek-api": "DeepSeek",
-  grok: "Grok",
-  kimi: "Kimi",
-  zhipu: "智谱 GLM",
-};
 const MARKS: Record<Provider, { mark: string; tone: string }> = {
   minimax: { mark: "M", tone: "violet" },
   openai: { mark: "◎", tone: "green" },
@@ -24,105 +15,16 @@ const MARKS: Record<Provider, { mark: string; tone: string }> = {
   kimi: { mark: "K", tone: "cyan" },
   zhipu: { mark: "Z", tone: "rose" },
 };
-const PERIODS: Record<QuotaPeriod, string> = { short: "短周期", daily: "日", weekly: "周", monthly: "月" };
-const PERIOD_SHORT: Record<QuotaPeriod, string> = { short: "短", daily: "日", weekly: "周", monthly: "月" };
-interface Config {
-  target: string;
-  refreshSeconds: number;
-  refreshLimit: number;
-  quietStart: number;
-  quietEnd: number;
-  paused: boolean;
+
+function hour(raw: string, fallback: number): number {
+  const value = Number(raw);
+  return Number.isFinite(value) ? Math.min(23, Math.max(0, Math.floor(value))) : fallback;
 }
 
-interface Target {
-  id: string;
-  provider: Provider;
-  label: string;
-  text: string;
-  tone: "safe" | "warn" | "danger" | "balance";
-  tooltip: string;
-}
-
-function positive(n: unknown, fallback: number) {
-  const v = Number(n);
-  return Number.isFinite(v) && v > 0 ? Math.floor(v) : fallback;
-}
-
-function hour(n: unknown, fallback: number) {
-  const v = Number(n);
-  return Number.isFinite(v) ? Math.min(23, Math.max(0, Math.floor(v))) : fallback;
-}
-
-/** start===end 关闭；23–8 跨日 */
-function inQuiet(start: number, end: number, h = new Date().getHours()) {
-  if (start === end) return false;
-  return start < end ? h >= start && h < end : h >= start || h < end;
-}
-
-function loadConfig(): Config {
-  try {
-    const saved = JSON.parse(localStorage.getItem("ai-quota.desktop") ?? "{}") as Partial<Config>;
-    return {
-      target: saved.target ?? "",
-      refreshSeconds: positive(saved.refreshSeconds, 120),
-      refreshLimit: positive(saved.refreshLimit, 30),
-      quietStart: hour(saved.quietStart, 23),
-      quietEnd: hour(saved.quietEnd, 8),
-      paused: saved.paused ?? false,
-    };
-  } catch {
-    return { target: "", refreshSeconds: 120, refreshLimit: 30, quietStart: 23, quietEnd: 8, paused: false };
-  }
-}
-
-function used(window: QuotaWindow): number {
-  return Math.max(0, Math.min(100, Number.isFinite(window.remainingPercent)
-    ? 100 - window.remainingPercent
-    : window.usedPercent));
-}
-
-function tone(percent: number): Target["tone"] {
-  return percent < 50 ? "safe" : percent < 80 ? "warn" : "danger";
-}
-
-function visibleWindows(provider: Provider, windows: Partial<Record<QuotaPeriod, QuotaWindow>>) {
-  return (Object.entries(windows) as [QuotaPeriod, QuotaWindow][])
-    .filter(([period]) => provider !== "deepseek-api" || period !== "monthly");
-}
-
-function targetsOf(providers: ProviderSnapshot[]): Target[] {
-  const targets: Target[] = [];
-  for (const name of PROVIDERS) {
-    const provider = providers.find((item) => item.provider === name);
-    if (!provider || provider.status !== "ok") continue;
-    for (const model of provider.models) {
-      const base = `${LABELS[provider.provider]} · ${model.name}`;
-      if (model.balance) {
-        const amount = model.balance.amount.toFixed(1);
-        targets.push({
-          id: targetId(provider.provider, model.name, "balance"),
-          provider: provider.provider,
-          label: `${LABELS[provider.provider]} 余额`,
-          text: `￥${amount}`,
-          tone: "balance",
-          tooltip: `${base}：￥${amount}`,
-        });
-      }
-      for (const [period, window] of visibleWindows(provider.provider, model.windows)) {
-        const percent = used(window);
-        targets.push({
-          id: targetId(provider.provider, model.name, period),
-          provider: provider.provider,
-          label: `${LABELS[provider.provider]} ${PERIOD_SHORT[period]}`,
-          text: `${Math.round(percent)}%`,
-          tone: tone(percent),
-          tooltip: `${base} · ${PERIODS[period]}：${percent.toFixed(1)}% 已用`,
-        });
-      }
-    }
-  }
-  return targets;
+function count(raw: string, max = Number.MAX_SAFE_INTEGER): number | undefined {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 1 || value > max) return undefined;
+  return Math.floor(value);
 }
 
 function message(error: unknown): string {
@@ -139,10 +41,6 @@ function remainingTime(iso: string): string {
   return hours % 24 ? `${days}d${hours % 24}h` : `${days}d`;
 }
 
-function targetId(provider: Provider, model: string, key: string) {
-  return JSON.stringify([provider, model, key]);
-}
-
 function ProviderCard({
   data, refreshing, selectedId, onRefresh, onSelect,
 }: {
@@ -153,7 +51,8 @@ function ProviderCard({
   onSelect: (id: string) => void;
 }) {
   const meta = MARKS[data.provider];
-  const singleModel = data.status === "ok" && data.models.length === 1 ? data.models[0] : undefined;
+  const models = visibleModels(data);
+  const singleModel = models.length === 1 ? models[0] : undefined;
   const headerBalance = singleModel?.balance && Object.keys(singleModel.windows).length
     ? `￥${singleModel.balance.amount.toFixed(1)}`
     : undefined;
@@ -167,12 +66,12 @@ function ProviderCard({
           {refreshing ? "…" : "↻"}
         </button>
       </header>
-      {data.status === "error" ? <p className="provider-error">{data.error.message}</p> : data.models.map((model) => {
+      {data.status === "error" ? <p className="provider-error">{data.error.message}</p> : models.map((model) => {
         const windows = visibleWindows(data.provider, model.windows);
         const balanceId = targetId(data.provider, model.name, "balance");
         return (
           <section className="model" key={model.name}>
-            {data.models.length > 1 && (
+            {models.length > 1 && (
               <div className="model-name">
                 <span>{model.name}</span>
                 {model.balance && windows.length > 0 && <b>￥{model.balance.amount.toFixed(1)}</b>}
@@ -204,40 +103,54 @@ function ProviderCard({
 }
 
 export default function App() {
-  const [config, setConfig] = useState(loadConfig);
+  const [config, updateConfig] = useState(loadConfig);
   const [providers, setProviders] = useState<ProviderSnapshot[]>([]);
   const [refreshedAt, setRefreshedAt] = useState<number>();
   const [initializing, setInitializing] = useState(true);
   const [refreshing, setRefreshing] = useState<Provider[]>([]);
   const [error, setError] = useState("");
+  const [autoLeft, setAutoLeft] = useState(config.refreshLimit);
+  const [silent, setSilent] = useState(false);
+  const revision = useRef(0);
 
-  const refreshAll = useCallback(async () => {
-    setError("");
-    try {
-      const snapshot = await queryQuota();
-      setProviders(snapshot.providers);
-      setRefreshedAt(Date.parse(snapshot.generatedAt));
-    } catch (cause) {
-      setError(`${message(cause)}（详见 EXE 同目录 log.txt）`);
-    } finally {
-      setInitializing(false);
+  const apply = useCallback((state: MonitorState) => {
+    if (state.revision < revision.current) return;
+    revision.current = state.revision;
+    localStorage.removeItem("ai-quota.desktop");
+    updateConfig(state.config);
+    setAutoLeft(state.autoLeft);
+    setSilent(state.silent);
+    setError(state.error);
+    if (state.snapshot) {
+      setProviders(state.snapshot.providers);
+      setRefreshedAt(Date.parse(state.snapshot.generatedAt));
     }
+    if (state.snapshot || state.error) setInitializing(false);
   }, []);
 
+  const setConfig = (next: Config) => {
+    void configureMonitor(next).then(apply).catch((cause) => setError(message(cause)));
+  };
+
+  const refreshAll = useCallback(async () => {
+    try {
+      apply(await queryQuota());
+    } catch (cause) {
+      setError(message(cause));
+      setInitializing(false);
+    }
+  }, [apply]);
+
   const refreshProvider = useCallback(async (provider: Provider) => {
-    setError("");
     setRefreshing((current) => [...current, provider]);
     try {
-      const snapshot = await queryQuota([provider]);
-      const next = snapshot.providers[0];
-      if (next) setProviders((current) => mergeProvider(current, next));
-      setRefreshedAt(Date.parse(snapshot.generatedAt));
+      apply(await queryQuota(provider));
     } catch (cause) {
-      setError(`${message(cause)}（详见 EXE 同目录 log.txt）`);
+      setError(message(cause));
     } finally {
       setRefreshing((current) => current.filter((item) => item !== provider));
     }
-  }, []);
+  }, [apply]);
 
   const orderedProviders = PROVIDERS.flatMap((provider) =>
     providers.filter((item) => item.provider === provider),
@@ -246,57 +159,25 @@ export default function App() {
   const selected = targets.find((target) => target.id === config.target) ?? targets[0];
 
   useEffect(() => {
-    void refreshAll();
-  }, [refreshAll]);
-
-  useEffect(() => {
-    void invoke("set_tray_display", {
-      text: selected?.text.replace("%", "") ?? "--",
-      tone: selected?.tone ?? "idle",
-      tooltip: selected?.tooltip ?? "AI Quota：等待额度数据",
-    });
-  }, [selected]);
-
-  useEffect(() => {
-    localStorage.setItem("ai-quota.desktop", JSON.stringify(config));
-  }, [config]);
-
-  useEffect(() => {
-    const subscription = listen("tray-refresh-all", () => void refreshAll());
-    return () => { void subscription.then((unlisten) => unlisten()); };
-  }, [refreshAll]);
-
-  const leftRef = useRef(config.refreshLimit);
-  const [autoLeft, setAutoLeft] = useState(config.refreshLimit);
-  const [now, setNow] = useState(() => Date.now());
-  const silent = inQuiet(config.quietStart, config.quietEnd, new Date(now).getHours());
-
-  useEffect(() => {
-    if (config.paused || !config.refreshSeconds) return;
-    const timer = window.setInterval(() => {
-      setNow(Date.now());
-      if (inQuiet(config.quietStart, config.quietEnd)) return;
-      void refreshAll();
-      leftRef.current -= 1;
-      setAutoLeft(leftRef.current);
-      if (leftRef.current <= 0) setConfig((c) => ({ ...c, paused: true }));
-    }, config.refreshSeconds * 1000);
-    return () => window.clearInterval(timer);
-  }, [config.paused, config.refreshSeconds, config.quietStart, config.quietEnd, refreshAll]);
-
+    let disposed = false;
+    const sync = (state: MonitorState) => { if (!disposed) apply(state); };
+    const subscriptions = Promise.all([
+      listen<MonitorState>("monitor-updated", (event) => sync(event.payload)),
+      listen("tauri://focus", () => { void getMonitor().then(sync); }),
+    ]);
+    void subscriptions.then(() => startMonitor(loadConfig())).then(sync)
+      .catch((cause) => { if (!disposed) setError(message(cause)); });
+    return () => {
+      disposed = true;
+      void subscriptions.then((listeners) => listeners.forEach((unlisten) => unlisten()));
+    };
+  }, [apply]);
   return (
     <main>
       <header className="app-header">
         <div><span className="brand">Q</span><div><strong>AI Quota</strong><small>{config.paused ? "已暂停" : silent ? "静默中" : refreshedAt ? `更新 ${new Date(refreshedAt).toLocaleTimeString("zh-CN", { hour12: false })} · 剩 ${autoLeft}` : "本地查询"}</small></div></div>
         <div className="header-actions">
-          <button className="pause" onClick={() => {
-            const next = !config.paused;
-            if (next === false) {
-              leftRef.current = config.refreshLimit;
-              setAutoLeft(config.refreshLimit);
-            }
-            setConfig({ ...config, paused: next });
-          }}>{config.paused ? "继续" : "暂停"}</button>
+          <button className="pause" onClick={() => setConfig({ ...config, paused: !config.paused })}>{config.paused ? "继续" : "暂停"}</button>
           <button className="refresh" onClick={() => void refreshAll()}>刷新全部</button>
           <button className="close" onClick={() => void invoke("hide_window")} aria-label="关闭">×</button>
         </div>
@@ -312,15 +193,16 @@ export default function App() {
         </label>
         <label className="interval">
           <span>间隔</span>
-          <div><input type="number" min={1} value={config.refreshSeconds} onChange={(event) => setConfig({ ...config, refreshSeconds: Number(event.target.value) })} /><small>s</small></div>
+          <div><input type="number" min={1} value={config.refreshSeconds} onChange={(event) => {
+            const refreshSeconds = count(event.target.value, 86400);
+            if (refreshSeconds) setConfig({ ...config, refreshSeconds });
+          }} /><small>s</small></div>
         </label>
         <label className="interval">
           <span>次数</span>
           <div><input type="number" min={1} value={config.refreshLimit} onChange={(event) => {
-            const refreshLimit = Number(event.target.value);
-            leftRef.current = refreshLimit;
-            setAutoLeft(refreshLimit);
-            setConfig({ ...config, refreshLimit });
+            const refreshLimit = count(event.target.value);
+            if (refreshLimit) setConfig({ ...config, refreshLimit });
           }} /><small>次</small></div>
         </label>
         <label className="quiet">

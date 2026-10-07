@@ -1,3 +1,5 @@
+mod monitor;
+
 use serde_json::{json, Map, Value};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -7,7 +9,7 @@ use tauri::image::Image;
 use tauri::menu::ContextMenu;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 
 const VIRTUAL_PI_AUTH: &str = "/pi/auth.json";
 const VIRTUAL_LEDGER: &str = "/config/ai-quota/api-usage.json";
@@ -339,7 +341,10 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
     builder
         .on_menu_event(|app, event| match event.id().0.as_str() {
             "refresh-all" => {
-                let _ = app.emit("tray-refresh-all", ());
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = monitor::refresh_monitor(app, None).await;
+                });
             }
             "settings" => show_window(app),
             "quit" => app.exit(0),
@@ -409,6 +414,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             install_autostart().map_err(std::io::Error::other)?;
             setup_tray(app)?;
+            monitor::setup(app);
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -422,7 +428,11 @@ pub fn run() {
             set_tray_display,
             read_runtime,
             write_runtime,
-            append_log
+            append_log,
+            monitor::start_monitor,
+            monitor::get_monitor,
+            monitor::configure_monitor,
+            monitor::refresh_monitor
         ])
         .run(tauri::generate_context!())
         .expect("error while running AI Quota");
