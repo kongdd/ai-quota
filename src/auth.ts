@@ -1,7 +1,7 @@
 import { dirname, env, existsSync, homedir, join, mkdirSync, platform, readFileSync, writeFileSync } from "./platform.js";
 
 /** 用户可独立启用/禁用的 provider —— 决定 `ai-quota` 默认查询哪些源。 */
-export const KNOWN_PROVIDERS = ["minimax", "openai", "claude", "opencode", "deepseek-api", "grok", "kimi", "zhipu"] as const;
+export const KNOWN_PROVIDERS = ["minimax", "openai", "claude", "opencode", "deepseek-api", "grok", "kimi", "zhipu", "github-copilot"] as const;
 export type KnownProvider = (typeof KNOWN_PROVIDERS)[number];
 
 /** 所有可被 `auth enable/disable` 操控的项目。 */
@@ -19,6 +19,7 @@ const PI_AUTH_PROVIDER_KEYS: Partial<Record<KnownProvider, readonly string[]>> =
   "deepseek-api": ["deepseek"],
   grok: ["xai", "grok-cli", "grok-build"],
   kimi: ["kimi-coding"],
+  "github-copilot": ["github-copilot"],
 };
 
 /** pi auth.json 中存在任一 `keys` 命名条目时返回 true。文件缺失/JSON 错 → false。 */

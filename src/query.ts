@@ -15,6 +15,7 @@ import { loadClaudeToken, queryQuota as queryClaude } from "./provider/claude.js
 import { queryQuota as queryOpencode } from "./provider/opencode.js";
 import { computeDeepseekUsage, defaultStatePath } from "./provider/deepseek.js";
 import { queryQuota as queryGrok } from "./provider/grok.js";
+import { queryQuota as queryCopilot } from "./provider/github-copilot.js";
 import { queryQuota as queryKimi, resolveKimiApiKey } from "./provider/kimi.js";
 import { queryQuota as queryZhipu, resolveZhipuApiKey, ZhipuError, type Region as ZhipuRegion } from "./provider/zhipu.js";
 
@@ -163,6 +164,7 @@ const RUNNERS: Record<Provider, Runner> = {
   opencode: runOpencode,
   "deepseek-api": runDeepseek,
   grok: runGrok,
+  "github-copilot": async (values) => (await queryCopilot({ timeoutMs: timeoutMs(values) })).model_remains,
   kimi: runKimi,
   zhipu: runZhipu,
 };
@@ -207,6 +209,7 @@ function windowSnapshot(window: NonNullable<ModelRemain["interval"]>, now: numbe
 
 function modelPeriods(provider: Provider, model: ModelRemain, values: QueryValues) {
   if (provider === "deepseek-api") return { interval: "daily", weekly: "weekly", monthly: "monthly" } as const;
+  if (provider === "github-copilot") return { interval: "monthly", weekly: "weekly", monthly: "monthly" } as const;
   if (provider === "grok") return { interval: "weekly", weekly: "monthly", monthly: "monthly" } as const;
   if (provider === "opencode" && !model.monthly) {
     return { interval: "short", weekly: opencodeLongWindow(values), monthly: "monthly" } as const;

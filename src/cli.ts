@@ -18,6 +18,7 @@ import {
 } from "./config.js";
 import { DeepSeekUsageError } from "./provider/deepseek.js";
 import { GrokAuthError } from "./provider/grok.js";
+import { CopilotError } from "./provider/github-copilot.js";
 import { KimiAuthError } from "./provider/kimi.js";
 import { ZhipuError } from "./provider/zhipu.js";
 import { renderReport, dim, displayName } from "./format.js";
@@ -44,7 +45,7 @@ const VERSION = (() => {
   }
 })();
 
-const HELP = `ai-quota — coding-plan quota for MiniMax, OpenAI Codex, Claude Code, OpenCode Go, DeepSeek API, Grok Build, Kimi Coding Plan, and Zhipu GLM Coding Plan
+const HELP = `ai-quota — coding-plan quota for MiniMax, OpenAI Codex, Claude Code, OpenCode Go, DeepSeek API, Grok Build, Kimi Coding Plan, Zhipu GLM Coding Plan, and GitHub Copilot
 
 Usage: ai-quota [options]
 
@@ -52,7 +53,7 @@ By default, queries all providers in parallel and prints one combined report.
 Use --provider to limit to a subset (repeatable or comma-separated). Use --watch to refresh periodically in place.
 
 Options:
-  -p, --provider <NAME>[,<NAME>...]  One or more of: minimax, openai, claude, opencode, deepseek-api, grok, kimi, zhipu
+  -p, --provider <NAME>[,<NAME>...]  One or more of: ${KNOWN_PROVIDERS.join(", ")}
                                  Also: -p openai claude  or  -p openai -p claude  (default: enabled ones; first run auto-detects from ~/.pi/agent/auth.json)
       --long [1w|1m]               OpenCode Go: omit value → 5h+1w+1m columns; 1w|1m → second column (else config)
   -r, --region <cn|intl>           MiniMax endpoint (default: cn)
@@ -129,6 +130,7 @@ function isFatal(e: unknown): boolean {
   if (e instanceof ClaudeAuthError) return !e.retryable;
   if (e instanceof OpencodeAuthError) return !e.retryable;
   if (e instanceof GrokAuthError) return !e.retryable;
+  if (e instanceof CopilotError) return !e.retryable;
   if (e instanceof KimiAuthError) return !e.retryable;
   if (e instanceof QuotaError) return e.status !== undefined; // 有 HTTP status = 致命
   if (e instanceof ZhipuError) return e.status !== undefined;  // 鉴权/HTTP 错误一律视为致命

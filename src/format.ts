@@ -68,6 +68,7 @@ function maxCols(items: ModelRemain[]): number {
 
 export function displayName(name: string): string {
   if (name === "general" || name === "MiniMax") return "minimax";
+  if (name === "github-copilot") return "gh-copilot";
   return name.replace(/\s*·\s*/g, "·");
 }
 
@@ -198,13 +199,14 @@ function renderReportCompact(
   const labels = ["5h", "wk", "mo"];
   for (const m of sorted) {
     lines.push(displayName(m.model_name));
+    const modelLabels = m.model_name === "github-copilot" ? ["mo"] : labels;
     const cols = colsForModel(m);
     for (let i = 0; i < cols.length; i++) {
       const value = cols[i]?.get(m);
       if (!value) continue;
       const { remaining, endTime } = value;
       const { bar, pct, dur } = cellBody(remaining, endTime, now, 8, pctWidth);
-      lines.push(`  ${labels[i]!.padEnd(3)} ${bar} ${pct}  ${dur}`);
+      lines.push(`  ${modelLabels[i]!.padEnd(3)} ${bar} ${pct}  ${dur}`);
     }
     if (m.balance) lines.push(`  bal ${money(m.balance.amount, m.balance.currency)}`);
     const extra = findExtra(extras, m.model_name);

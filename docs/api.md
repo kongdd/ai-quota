@@ -26,6 +26,7 @@ ai-quota serve --cors-origin https://quota.example.com
 GET /api/v1/health
 GET /api/v1/quotas
 GET /api/v1/quotas?providers=openai,claude
+GET /api/v1/quotas?providers=github-copilot
 GET /api/v1/codex/reset-cards
 ```
 
@@ -106,5 +107,6 @@ Codex 重置卡：
 
 - `status`：`ok`、`partial` 或 `error`；单个 provider 失败不影响其他结果。
 - 百分比范围为 `0–100`；时间为 UTC ISO 8601；时长单位为毫秒。
+- `github-copilot` 返回 `windows.monthly`：月度 included AI credits / premium requests，不含额外付费用量。
 - API 始终返回当前快照，不缓存响应。
 - `/api/v1` 内只新增可选字段；删除字段或改变语义时升级 API 版本。
