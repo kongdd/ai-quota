@@ -19,7 +19,12 @@ function fmtDuration(ms: number): string {
 }
 
 function fmtTime(epochMs: number): string {
-  return new Date(epochMs).toLocaleString("sv-SE", { hour12: false });
+  const date = new Date(epochMs);
+  const timeZone = "America/Los_Angeles";
+  const pacific = date.toLocaleString("sv-SE", { timeZone, hour12: false });
+  const zone = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" })
+    .formatToParts(date).find((part) => part.type === "timeZoneName")!.value;
+  return `${date.toLocaleString("sv-SE", { hour12: false })} (${zone} ${pacific})`;
 }
 
 /** 把 0~100 的剩余百分比渲染成进度条（已用 = 100 - remaining） */
