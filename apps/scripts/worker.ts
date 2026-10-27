@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { EnvHttpProxyAgent, fetch as httpFetch } from "undici";
-import { queryBrowserQuota, type BrowserQueryOptions } from "../../../src/browser";
+import { queryBrowserQuota, type BrowserQueryOptions } from "../../src/browser";
 import { targetsOf } from "../src/display";
 import { DESKTOP_QUERY_VALUES, requestLabel } from "../src/network";
 import { mergeProvider, type ProviderSnapshot } from "../src/types";

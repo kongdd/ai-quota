@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)
-desktop="$root/apps/desktop"
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+desktop="$root/apps"
 target=x86_64-pc-windows-msvc
 release="$desktop/src-tauri/target/$target/release"
 out="$root/dist-windows"

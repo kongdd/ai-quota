@@ -412,7 +412,10 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .setup(|app| {
             #[cfg(target_os = "macos")]
-            install_autostart().map_err(std::io::Error::other)?;
+            {
+                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                install_autostart().map_err(std::io::Error::other)?;
+            }
             setup_tray(app)?;
             monitor::setup(app);
             Ok(())

@@ -6,29 +6,18 @@ dist/
 .env.local
 .envrc
 *lock*
-!apps/mobile/package-lock.json
-!apps/mobile/src-tauri/Cargo.lock
-
-# Android / Tauri build artifacts
-apps/mobile/dist-android/
-apps/mobile/src-tauri/target/
-apps/mobile/src-tauri/gen/android/
-
 *issue*
 *.png
 *lock*
 *.json
 
 target
-apps/*
-!apps/desktop/
-apps/desktop/node_modules/
-!apps/desktop/package.json
-!apps/desktop/tsconfig.json
-!apps/desktop/src-tauri/tauri.conf.json
-!apps/desktop/src-tauri/capabilities/default.json
-!apps/desktop/src-tauri/Cargo.lock
-!apps/desktop/src-tauri/icons/icon.png
+!apps/package.json
+!apps/tsconfig.json
+!apps/src-tauri/tauri.conf.json
+!apps/src-tauri/capabilities/default.json
+!apps/src-tauri/Cargo.lock
+!apps/src-tauri/icons/icon.png
 
 *.exe
 *.dll
