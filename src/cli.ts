@@ -2,12 +2,13 @@
 import "./node-platform.js";
 import process from "node:process";
 import { parseArgs } from "node:util";
+import { createInterface } from "node:readline/promises";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { EnvHttpProxyAgent, setGlobalDispatcher } from "undici";
 import { QuotaError } from "./provider/minimax.js";
-import { queryResetCredits, CodexAuthError, loadCodexToken, type CodexResetCredit, type CodexResetCredits } from "./provider/openai.js";
+import { consumeResetCredit, queryResetCredits, CodexAuthError, loadCodexToken, type CodexResetCredit, type CodexResetCredits } from "./provider/openai.js";
 import { ClaudeAuthError } from "./provider/claude.js";
 import { OpencodeAuthError } from "./provider/opencode.js";
 import {
@@ -74,6 +75,8 @@ Subcommands:
   ai-quota config long <1w|1m>              Set OpenCode Go week vs month quota display
   ai-quota budget -p deepseek-api -w 10 -m 70   Persist DeepSeek weekly/monthly caps (no API call)
   ai-quota query reset-card -p codex         Show Codex rate-limit reset cards
+  ai-quota --reset-card use [-y]             Use the earliest-expiring Codex reset card
+  ai-quota use --reset-card [-y]             Same as above
   ai-quota serve                             Start the local JSON API
 `;
 
@@ -104,6 +107,12 @@ One-off: ai-quota -p opencode --long 1w | ai-quota -p opencode --long (three col
 `;
 
 const QUERY_HELP = `Usage: ai-quota query reset-card -p codex
+`;
+
+const RESET_CARD_HELP = `Usage: ai-quota --reset-card use [-y|--yes]
+       ai-quota use --reset-card [-y|--yes]
+
+Uses the earliest-expiring Codex reset card. Requires typing yes or y unless -y is given.
 `;
 
 function die(msg: string): never {
@@ -271,6 +280,59 @@ async function handleQuerySubcommand(args: string[]): Promise<void> {
   }
 }
 
+async function handleResetCardSubcommand(args: string[]): Promise<void> {
+  if (args.includes("-h") || args.includes("--help")) {
+    process.stdout.write(RESET_CARD_HELP);
+    return;
+  }
+  let yes: boolean;
+  try {
+    const { values } = parseArgs({
+      args,
+      options: { yes: { type: "boolean", short: "y" } },
+    });
+    yes = values.yes === true;
+  } catch (e) {
+    die(`${e instanceof Error ? e.message : e}\n${RESET_CARD_HELP}`);
+  }
+  if (!yes && !process.stdin.isTTY) die("confirmation requires a terminal; use -y to skip it");
+
+  try {
+    const token = loadCodexToken();
+    const data = await queryResetCredits(token);
+    const cards = data.credits.filter((card) => card.status === "available");
+    if (cards.length !== data.availableCount) throw new Error("reset card count mismatch; cannot select a card safely");
+    if (cards.some((card) => !card.expiresAt || !Number.isFinite(Date.parse(card.expiresAt)))) {
+      throw new Error("reset card expiry is missing or invalid; cannot select a card safely");
+    }
+    const card = cards
+      .filter((c) => Date.parse(c.expiresAt!) > Date.now())
+      .sort((a, b) => Date.parse(a.expiresAt!) - Date.parse(b.expiresAt!))[0];
+    if (!card) throw new Error("no available reset cards");
+    if (typeof card.id !== "string" || !card.id.trim()) throw new Error("reset card ID is missing");
+
+    process.stdout.write(`Reset card: ${card.title ?? "-"} (${card.id})\nExpires: ${localTime(card.expiresAt)}\n`);
+    if (!yes) {
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      let answer: string;
+      try {
+        answer = await rl.question("Use this card? This cannot be undone. Type yes or y to confirm: ");
+      } finally {
+        rl.close();
+      }
+      if (!["yes", "y"].includes(answer.trim().toLowerCase())) {
+        process.stdout.write("Cancelled.\n");
+        return;
+      }
+    }
+    if (Date.parse(card.expiresAt!) <= Date.now()) throw new Error("reset card has expired");
+    await consumeResetCredit(token, card.id);
+    process.stdout.write("Reset card applied.\n");
+  } catch (e) {
+    die(formatError(e));
+  }
+}
+
 /** 渲染单帧，并返回首个致命错误。 */
 function renderFrame(results: QueryResult[], compact?: boolean, extras?: Record<string, string>): { body: string; fatal?: Extract<QueryResult, { ok: false }> } {
   const items = results.filter((r): r is Extract<QueryResult, { ok: true }> => r.ok).flatMap((r) => r.items);
@@ -374,6 +436,16 @@ async function main(): Promise<void> {
   }
   if (argv[0] === "query") {
     await handleQuerySubcommand(argv.slice(1));
+    return;
+  }
+  if (argv[0] === "use") {
+    if (argv[1] === "--reset-card") await handleResetCardSubcommand(argv.slice(2));
+    else if (argv[1] === "-h" || argv[1] === "--help") process.stdout.write(RESET_CARD_HELP);
+    else die(RESET_CARD_HELP.trim());
+    return;
+  }
+  if (argv[0] === "--reset-card" && argv[1] === "use") {
+    await handleResetCardSubcommand(argv.slice(2));
     return;
   }
   if (argv[0] === "serve") {

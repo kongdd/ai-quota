@@ -40,6 +40,8 @@ ai-quota                              # all enabled providers
 ai-quota -p minimax                   # set one provider
 ai-quota -i 30s                       # refresh in place every 30s
 ai-quota query reset-card -p codex    # show Codex reset cards
+ai-quota --reset-card use             # use the earliest-expiring card (confirm with yes or y)
+ai-quota use --reset-card -y          # same command, skip confirmation
 
 # 1week 10￥ / 1mon 70￥
 ai-quota budget -p deepseek-api -w 10 -m 70

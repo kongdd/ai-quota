@@ -56,6 +56,7 @@ interface WhamResponse {
 }
 
 export interface CodexResetCredit {
+  id?: string;
   status?: string;
   grantedAt?: string;
   expiresAt?: string;
@@ -70,6 +71,7 @@ export interface CodexResetCredits {
 interface ResetCreditResponse {
   available_count?: number;
   credits?: Array<{
+    id?: string;
     status?: string;
     granted_at?: string;
     expires_at?: string;
@@ -200,6 +202,7 @@ export async function queryResetCredits(
 
     const data = (await resp.json()) as ResetCreditResponse;
     const credits = (data.credits ?? []).map((c) => ({
+      id: c.id,
       status: c.status,
       grantedAt: c.granted_at,
       expiresAt: c.expires_at,
@@ -217,6 +220,33 @@ export async function queryResetCredits(
     throw new CodexAuthError(e instanceof Error && e.name === "AbortError"
       ? `timeout after ${opts.timeoutMs ?? 30_000}ms`
       : `network: ${e instanceof Error ? e.message : e}`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** 使用指定的重置卡；不自动重试，避免重复消费。 */
+export async function consumeResetCredit(token: CodexToken, creditId: string): Promise<void> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 30_000);
+  try {
+    const resp = await fetchQuota("https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume", {
+      method: "POST",
+      headers: { ...buildCodexHeaders(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ credit_id: creditId, redeem_request_id: randomUUID() }),
+      signal: ctrl.signal,
+    });
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => "");
+      throw new Error(`HTTP ${resp.status} ${body.slice(0, 200)}`);
+    }
+    const data = (await resp.json()) as { code?: string };
+    if (data.code !== "reset") throw new Error(`redemption not confirmed: ${data.code ?? "unknown response"}`);
+  } catch (e) {
+    throw new CodexAuthError(
+      `${e instanceof Error ? e.message : e}; check reset cards before retrying`,
+      false,
+    );
   } finally {
     clearTimeout(timer);
   }
